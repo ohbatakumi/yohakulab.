@@ -176,13 +176,13 @@ function demoApi(question: string): Api {
 
 // anchor points (x%, y%) around the question; the centre stays empty
 const SLOTS_WIDE: [number, number][] = [
-    [16, 20], [40, 13], [66, 15], [84, 25],
-    [12, 47], [83, 52],
-    [17, 76], [42, 86], [64, 84], [83, 74],
+    [16, 25], [40, 18], [66, 20], [84, 29],
+    [12, 50], [83, 54],
+    [17, 75], [40, 84], [64, 82], [84, 72],
 ]
 const SLOTS_NARROW: [number, number][] = [
-    [32, 13], [62, 25],
-    [36, 75], [62, 88],
+    [32, 18], [62, 29],
+    [36, 71], [62, 83],
 ]
 
 const fmtMonth = (m?: string) => (m ? m.slice(0, 7).replace("-", ".") : "")
@@ -483,11 +483,11 @@ export default function YohakuQuestion(props) {
         >
             <style>{css}</style>
 
-            {/* header line */}
+            {/* label row — kept at the bottom so the site's fixed header stays clear */}
             <div
                 style={{
                     position: "absolute",
-                    top: narrow ? 24 : 40,
+                    bottom: narrow ? 22 : 36,
                     left: narrow ? 20 : 48,
                     right: narrow ? 20 : 48,
                     display: "flex",
@@ -501,6 +501,11 @@ export default function YohakuQuestion(props) {
                     <span style={{ fontFamily: SERIF, fontStyle: "italic", letterSpacing: "0.02em", fontSize: 14, marginLeft: 12, color: ink }}>
                         {fmtMonth(question?.month) || "—"}
                     </span>
+                    {!narrow && (
+                        <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, letterSpacing: "0.02em", marginLeft: 20 }}>
+                            A question for this month
+                        </span>
+                    )}
                     {preview && <span style={{ marginLeft: 12 }}>（プレビュー）</span>}
                 </div>
                 <button className="yl-ul" style={{ ...label, color: ink }} onClick={openArchive}>
@@ -530,10 +535,12 @@ export default function YohakuQuestion(props) {
                         >
                             <div
                                 style={{
-                                    animation: f.out
-                                        ? `ylOut ${reduced ? 1.2 : 1.6}s ease forwards`
-                                        : `ylIn ${reduced ? 1.2 : 2.2}s cubic-bezier(.2,.6,.2,1) ${f.delay}s forwards`,
-                                    opacity: 0,
+                                    animation: isCanvas
+                                        ? undefined
+                                        : f.out
+                                          ? `ylOut ${reduced ? 1.2 : 1.6}s ease forwards`
+                                          : `ylIn ${reduced ? 1.2 : 2.2}s cubic-bezier(.2,.6,.2,1) ${f.delay}s forwards`,
+                                    opacity: isCanvas ? 1 : 0,
                                 }}
                             >
                                 <div
@@ -703,25 +710,6 @@ export default function YohakuQuestion(props) {
                     {count}
                 </span>
             </button>
-
-            {/* bottom note */}
-            <div
-                style={{
-                    position: "absolute",
-                    bottom: narrow ? 20 : 36,
-                    left: narrow ? 20 : 48,
-                    right: narrow ? 20 : 48,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    ...label,
-                    zIndex: 2,
-                    pointerEvents: "none",
-                }}
-            >
-                <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, letterSpacing: "0.02em" }}>
-                    A question for this month
-                </span>
-            </div>
 
             {/* panels */}
             <div
