@@ -442,7 +442,7 @@ export default function YohakuQuestion(props) {
     }
 
     /* ── render ── */
-    const qSize = narrow ? Math.max(22, Math.min(28, w * 0.066)) : Math.max(34, Math.min(56, w * 0.038))
+    const qSize = narrow ? Math.max(18, Math.min(21, w * 0.052)) : Math.max(34, Math.min(56, w * 0.038))
     const count = visible.length
 
     const css = `
@@ -458,6 +458,7 @@ export default function YohakuQuestion(props) {
     .yl-q .yl-ul:hover, .yl-q .yl-ul:focus-visible { background-size: 100% 1px }
     .yl-q .yl-scroll::-webkit-scrollbar { width: 0 }
     .yl-q :focus-visible { outline: 1px solid ${ink}; outline-offset: 4px }
+    .yl-q input:focus-visible { outline: none }
     `
 
     const label: React.CSSProperties = {
@@ -523,13 +524,23 @@ export default function YohakuQuestion(props) {
                         </span>
                     )}
                 </div>
-                <button className="yl-ul" style={{ ...label, color: ink }} onClick={openArchive}>
+                <button className="yl-ul" style={{ ...label, color: ink, padding: "10px 0" }} onClick={openArchive}>
                     これまでの問い
                 </button>
             </div>
 
             {/* floating words */}
-            <div aria-hidden={panel ? true : undefined} style={{ position: "absolute", inset: 0, zIndex: 1 }}>
+            <div
+                aria-hidden={panel ? true : undefined}
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 1,
+                    // on phones the words step back while someone is writing
+                    opacity: narrow && form ? 0.12 : 1,
+                    transition: "opacity .8s ease",
+                }}
+            >
                 {floats.map((f) => {
                     const a = byId.get(f.id)
                     if (!a) return null
@@ -582,7 +593,7 @@ export default function YohakuQuestion(props) {
                     left: "50%",
                     top: "50%",
                     transform: "translate(-50%, -50%)",
-                    width: narrow ? "calc(100% - 88px)" : "min(46%, 640px)",
+                    width: narrow ? "calc(100% - 128px)" : "min(46%, 640px)",
                     textAlign: "center",
                     zIndex: 2,
                     pointerEvents: "none",
@@ -617,7 +628,14 @@ export default function YohakuQuestion(props) {
                                 setForm(true)
                                 setNote("")
                             }}
-                            style={{ display: "inline-flex", alignItems: "center", gap: 14, fontSize: 13, letterSpacing: "0.16em" }}
+                            style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 14,
+                                fontSize: 13,
+                                letterSpacing: "0.16em",
+                                padding: narrow ? "16px 12px" : "8px 4px",
+                            }}
                         >
                             <span style={{ display: "inline-block", width: 32, height: 1, background: ink }} />
                             <span className="yl-ul">ひとこと添える</span>
@@ -631,8 +649,10 @@ export default function YohakuQuestion(props) {
                                 flexDirection: "column",
                                 alignItems: "center",
                                 gap: 14,
-                                width: narrow ? "100%" : 420,
-                                margin: "0 auto",
+                                width: narrow ? "min(340px, calc(100vw - 48px))" : 420,
+                                position: "relative",
+                                left: "50%",
+                                transform: "translateX(-50%)",
                                 background: paper,
                                 padding: "6px 0",
                             }}
@@ -661,7 +681,7 @@ export default function YohakuQuestion(props) {
                                     style={{
                                         flex: 1,
                                         fontSize: 16,
-                                        padding: "6px 0",
+                                        padding: narrow ? "12px 0" : "6px 0",
                                         borderBottom: `1px solid ${line}`,
                                     }}
                                 />
@@ -682,7 +702,12 @@ export default function YohakuQuestion(props) {
                                     type="submit"
                                     disabled={sending}
                                     className="yl-ul"
-                                    style={{ fontSize: 13, letterSpacing: "0.16em", opacity: sending ? 0.4 : 1 }}
+                                    style={{
+                                        fontSize: 13,
+                                        letterSpacing: "0.16em",
+                                        opacity: sending ? 0.4 : 1,
+                                        ...(narrow ? { border: `1px solid ${ink}`, padding: "12px 20px", backgroundImage: "none" } : {}),
+                                    }}
                                 >
                                     添える
                                 </button>
@@ -691,7 +716,7 @@ export default function YohakuQuestion(props) {
                                 <span style={{ ...label, letterSpacing: "0.06em" }} role="status">
                                     {note}
                                 </span>
-                                <button type="button" onClick={() => setForm(false)} style={{ ...label }}>
+                                <button type="button" onClick={() => setForm(false)} style={{ ...label, padding: "8px 0 8px 12px" }}>
                                     閉じる
                                 </button>
                             </div>
@@ -713,8 +738,11 @@ export default function YohakuQuestion(props) {
                     display: "flex",
                     alignItems: "center",
                     gap: 14,
-                    padding: "10px 6px",
+                    padding: narrow ? "16px 10px" : "10px 6px",
                     zIndex: 3,
+                    opacity: narrow && form ? 0 : 1,
+                    pointerEvents: narrow && form ? "none" : "auto",
+                    transition: "opacity .6s ease",
                     fontSize: 12,
                     letterSpacing: "0.24em",
                 }}
