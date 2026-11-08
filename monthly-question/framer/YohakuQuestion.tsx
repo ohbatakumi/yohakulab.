@@ -217,6 +217,7 @@ export default function YohakuQuestion(props) {
     const [question, setQuestion] = useState<Question | null>({ id: 0, month: "", body: fallbackQuestion })
     const [answers, setAnswers] = useState<Answer[]>([])
     const [loaded, setLoaded] = useState(false)
+    const [conn, setConn] = useState<"wait" | "ok" | "error" | "empty">("wait")
     const [panel, setPanel] = useState<null | "all" | "archive">(null)
     const [form, setForm] = useState(false)
     const [reduced, setReduced] = useState(false)
@@ -237,9 +238,10 @@ export default function YohakuQuestion(props) {
             .then((d) => {
                 if (!alive) return
                 if (d.question) setQuestion(d.question)
+                setConn(d.question ? "ok" : "empty")
                 setAnswers(d.answers || [])
             })
-            .catch(() => {})
+            .catch(() => alive && setConn("error"))
             .finally(() => alive && setLoaded(true))
         return () => {
             alive = false
@@ -499,7 +501,7 @@ export default function YohakuQuestion(props) {
                 <div style={label}>
                     今月の問い
                     <span style={{ fontFamily: SERIF, fontStyle: "italic", letterSpacing: "0.02em", fontSize: 14, marginLeft: 12, color: ink }}>
-                        {fmtMonth(question?.month) || "—"}
+                        {fmtMonth(question?.month) || fmtMonth(new Date().toISOString())}
                     </span>
                     {!narrow && (
                         <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, letterSpacing: "0.02em", marginLeft: 20 }}>
@@ -507,6 +509,19 @@ export default function YohakuQuestion(props) {
                         </span>
                     )}
                     {preview && <span style={{ marginLeft: 12 }}>（プレビュー）</span>}
+                    {/* connection status, shown only inside the Framer editor */}
+                    {!preview && isCanvas && (
+                        <span style={{ marginLeft: 12 }}>
+                            {
+                                {
+                                    wait: "（Supabase 接続中…）",
+                                    ok: "（Supabase 接続済み）",
+                                    empty: "（Supabase 接続済み・今月の問いが未登録）",
+                                    error: "（Supabase に接続できません。SQL の実行とキーを確認）",
+                                }[conn]
+                            }
+                        </span>
+                    )}
                 </div>
                 <button className="yl-ul" style={{ ...label, color: ink }} onClick={openArchive}>
                     これまでの問い
