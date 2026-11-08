@@ -7,6 +7,7 @@ const FONT_HREF =
     "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Shippori+Mincho:wght@400&family=Zen+Kaku+Gothic+New:wght@400&display=swap"
 
 const DEFAULT_BOTTLE = "https://framerusercontent.com/images/M1VCCaOkZ1HHTGdf0FgExgF4Zdk.webp"
+const DEFAULT_SILHOUETTE = "https://framerusercontent.com/images/8J6Lt8SjxBc98UHnXOC8DqZHA.png"
 
 const DEFAULT_TEXT = `就寝前の静かなひと時、
 深い森の中で深呼吸をするようにヒノキが香る。
@@ -27,6 +28,7 @@ function ensureFonts() {
 
 type Props = {
     bottle?: { src: string; alt?: string } | string
+    silhouette?: { src: string } | string
     title: string
     accent: string
     description: string
@@ -43,6 +45,7 @@ const srcOf = (v: any) => (typeof v === "string" ? v : v?.src || "")
 export default function YohakuGin(props: Props) {
     const { title, accent, description, bottomLeft, bottomRight, paper, ink, mute } = props
     const bottle = srcOf(props.bottle) || DEFAULT_BOTTLE
+    const silhouette = srcOf(props.silhouette) || DEFAULT_SILHOUETTE
     const isCanvas = RenderTarget.current() === RenderTarget.canvas
 
     const hostRef = React.useRef<HTMLElement>(null)
@@ -83,11 +86,12 @@ export default function YohakuGin(props: Props) {
     const ease = "cubic-bezier(.22,.61,.36,1)"
 
     // bottle size: by height, leaving air above and below
-    const bottleH = narrow ? Math.min(h * 0.56, w * 1.3) : h * 0.78
+    const bottleH = narrow ? Math.min(h * 0.5, w * 1.2) : h * 0.78
     const bottleW = bottleH * (690 / 1440)
     const bottleTop = narrow ? h * 0.07 : (h - bottleH) / 2 + h * 0.01
     // the name crosses the shoulders, where the glass is clear, so it reads through the bottle
-    const titleY = bottleTop + bottleH * 0.315
+    // (on phones the name moves below the bottle so it stays legible)
+    const titleY = narrow ? bottleTop + bottleH + h * 0.055 : bottleTop + bottleH * 0.315
     const titleSize = narrow ? w * 0.104 : Math.min(w * 0.112, h * 0.2)
     // the words sit to the right, just under the name
     const wordsLeft = w / 2 + bottleW / 2 + Math.max(40, (w / 2 - bottleW / 2) * 0.12)
@@ -114,31 +118,66 @@ export default function YohakuGin(props: Props) {
                 background: paper,
             }}
         >
-            {/* the name */}
-            <h2
-                style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    top: titleY,
-                    transform: "translateY(-50%)",
-                    margin: 0,
-                    textAlign: "center",
-                    fontFamily: `"Cormorant Garamond", "Instrument Serif", serif`,
-                    fontWeight: 300,
-                    fontSize: titleSize,
-                    lineHeight: 1,
-                    letterSpacing: "-0.015em",
-                    color: ink,
-                    whiteSpace: "nowrap",
-                    opacity: show ? 1 : 0,
-                    transition: `opacity 2.4s ${ease}`,
-                    pointerEvents: "none",
-                    userSelect: "none",
-                }}
-            >
-                {title} <i style={{ fontWeight: 300 }}>{accent}</i>
-            </h2>
+            {/* the name: sharp around the bottle, blurred where the bottle stands in front of it */}
+            {[false, true].map((behind) => {
+                const maskPos = `${w / 2 - bottleW / 2}px ${bottleTop}px`
+                const maskSize = `${bottleW}px ${bottleH}px`
+                const mask: React.CSSProperties = behind
+                    ? {
+                          WebkitMaskImage: `url(${silhouette})`,
+                          maskImage: `url(${silhouette})`,
+                          WebkitMaskPosition: maskPos,
+                          maskPosition: maskPos,
+                          WebkitMaskSize: maskSize,
+                          maskSize: maskSize,
+                          WebkitMaskRepeat: "no-repeat",
+                          maskRepeat: "no-repeat",
+                      }
+                    : ({
+                          WebkitMaskImage: `linear-gradient(#000, #000), url(${silhouette})`,
+                          maskImage: `linear-gradient(#000, #000), url(${silhouette})`,
+                          WebkitMaskPosition: `0 0, ${maskPos}`,
+                          maskPosition: `0 0, ${maskPos}`,
+                          WebkitMaskSize: `100% 100%, ${maskSize}`,
+                          maskSize: `100% 100%, ${maskSize}`,
+                          WebkitMaskRepeat: "no-repeat",
+                          maskRepeat: "no-repeat",
+                          WebkitMaskComposite: "xor",
+                          maskComposite: "exclude",
+                      } as any)
+                return (
+                    <div
+                        key={behind ? "b" : "f"}
+                        aria-hidden={behind}
+                        style={{ position: "absolute", inset: 0, pointerEvents: "none", ...mask }}
+                    >
+                        <h2
+                            style={{
+                                position: "absolute",
+                                left: 0,
+                                right: 0,
+                                top: titleY,
+                                transform: "translateY(-50%)",
+                                margin: 0,
+                                textAlign: "center",
+                                fontFamily: `"Cormorant Garamond", "Instrument Serif", serif`,
+                                fontWeight: 300,
+                                fontSize: titleSize,
+                                lineHeight: 1,
+                                letterSpacing: "-0.015em",
+                                color: ink,
+                                whiteSpace: "nowrap",
+                                filter: behind ? `blur(${Math.max(4, titleSize * 0.07)}px)` : "none",
+                                opacity: show ? (behind ? 0.5 : 1) : 0,
+                                transition: `opacity 2.4s ${ease}`,
+                                userSelect: "none",
+                            }}
+                        >
+                            {title} <i style={{ fontWeight: 300 }}>{accent}</i>
+                        </h2>
+                    </div>
+                )
+            })}
 
             {/* soft contact shadow */}
             <div
@@ -189,7 +228,7 @@ export default function YohakuGin(props: Props) {
                               position: "absolute",
                               left: 24,
                               right: 24,
-                              top: bottleTop + bottleH + h * 0.06,
+                              top: titleY + titleSize * 0.9,
                               textAlign: "center",
                           }
                         : {
@@ -249,6 +288,7 @@ YohakuGin.defaultProps = {
 
 addPropertyControls(YohakuGin, {
     bottle: { type: ControlType.ResponsiveImage, title: "Bottle" },
+    silhouette: { type: ControlType.ResponsiveImage, title: "Bottle Shape" },
     title: { type: ControlType.String, title: "Title" },
     accent: { type: ControlType.String, title: "Accent" },
     description: { type: ControlType.String, title: "Back Text", displayTextArea: true },
