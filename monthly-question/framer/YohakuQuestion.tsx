@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { addPropertyControls, ControlType, RenderTarget } from "framer"
 
 /**
@@ -417,7 +418,7 @@ export default function YohakuQuestion(props) {
                     priority.current = null
                     return [...cur.map((f) => (f.key === old.key ? { ...f, out: true } : f)), spawn(old.slot, r.answer!.id)]
                 })
-                setTimeout(() => setForm(false), 1400)
+                if (!narrow) setTimeout(() => setForm(false), 1400)
             } else {
                 if (r.answer) setAnswers((l) => [{ ...r.answer!, pending: true }, ...l])
                 setNote("受け取りました。確かめたのち、ここに浮かびます。")
@@ -428,6 +429,37 @@ export default function YohakuQuestion(props) {
             setSending(false)
         }
     }
+
+    // desktop: focus the first field without scrolling the page
+    const msgRef = useRef<HTMLInputElement>(null)
+    useEffect(() => {
+        if (form && !narrow) msgRef.current?.focus({ preventScroll: true })
+    }, [form, narrow])
+
+    // phone: the writing sheet covers the screen; hold the page still underneath
+    // so the keyboard can't push it anywhere
+    const sheet = narrow && form && !isCanvas
+    useEffect(() => {
+        if (!sheet) return
+        const y = window.scrollY
+        const b = document.body
+        const h = document.documentElement
+        const prev = { pos: b.style.position, top: b.style.top, w: b.style.width, ov: h.style.overflow }
+        b.style.position = "fixed"
+        b.style.top = `-${y}px`
+        b.style.width = "100%"
+        h.style.overflow = "hidden"
+        const onKey = (e: KeyboardEvent) => e.key === "Escape" && setForm(false)
+        window.addEventListener("keydown", onKey)
+        return () => {
+            b.style.position = prev.pos
+            b.style.top = prev.top
+            b.style.width = prev.w
+            h.style.overflow = prev.ov
+            window.scrollTo(0, y)
+            window.removeEventListener("keydown", onKey)
+        }
+    }, [sheet])
 
     /* ── archive ── */
     const [archive, setArchive] = useState<ArchiveItem[] | null>(null)
@@ -622,7 +654,7 @@ export default function YohakuQuestion(props) {
                 </h2>
 
                 <div style={{ marginTop: narrow ? 28 : 40, pointerEvents: "auto" }}>
-                    {!form ? (
+                    {!form || narrow ? (
                         <button
                             onClick={() => {
                                 setForm(true)
@@ -662,7 +694,7 @@ export default function YohakuQuestion(props) {
                                 onChange={(e) => setMsg(e.target.value.slice(0, 60))}
                                 placeholder="ひとこと（60字まで）"
                                 aria-label="ひとこと"
-                                autoFocus
+                                ref={msgRef}
                                 style={{
                                     width: "100%",
                                     fontFamily: MINCHO,
@@ -725,6 +757,31 @@ export default function YohakuQuestion(props) {
                 </div>
             </div>
 
+            {sheet &&
+                createPortal(
+                    <WriteSheet
+                        css={css}
+                        question={question}
+                        answers={answers}
+                        paper={paper}
+                        ink={ink}
+                        mute={mute}
+                        line={line}
+                        nick={nick}
+                        setNick={setNick}
+                        msg={msg}
+                        setMsg={setMsg}
+                        trap={trap}
+                        setTrap={setTrap}
+                        sending={sending}
+                        note={note}
+                        onSubmit={submit}
+                        onClose={() => setForm(false)}
+                        onLike={toggleLike}
+                    />,
+                    document.body
+                )}
+
             {/* side button: all words */}
             <button
                 onClick={() => setPanel("all")}
@@ -778,6 +835,146 @@ export default function YohakuQuestion(props) {
 }
 
 /* ───────────────────────── parts ───────────────────────── */
+
+/* the writing page on phones: one question, two fields, and the words
+   already left by others, each given room to breathe */
+function WriteSheet(p: any) {
+    const { css, question, answers, paper, ink, mute, line, nick, setNick, msg, setMsg, trap, setTrap, sending, note, onSubmit, onClose, onLike } = p
+    const list = (answers as Answer[]).slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+    const small: React.CSSProperties = { fontFamily: SANS, fontSize: 11, letterSpacing: "0.14em", color: mute }
+    const field: React.CSSProperties = {
+        width: "100%",
+        fontSize: 16, // 16px keeps iOS from zooming in
+        textAlign: "center",
+        padding: "14px 0",
+        background: "transparent",
+        border: 0,
+        outline: "none",
+        borderRadius: 0,
+    }
+    return (
+        <div
+            className="yl-q"
+            role="dialog"
+            aria-modal="true"
+            aria-label="ひとこと添える"
+            data-lenis-prevent
+            style={{
+                position: "fixed",
+                inset: 0,
+                height: "100dvh",
+                zIndex: 2147483000,
+                background: paper,
+                color: ink,
+                overflowY: "auto",
+                overscrollBehavior: "contain",
+                WebkitOverflowScrolling: "touch",
+                fontFamily: SANS,
+                animation: "ylFade .7s ease",
+            }}
+        >
+            <style>{css}</style>
+            <div style={{ maxWidth: 440, margin: "0 auto", padding: "26px 32px 120px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={small}>
+                        今月の問い
+                        <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, letterSpacing: "0.02em", marginLeft: 10, color: ink }}>
+                            {fmtMonth(question?.month) || fmtMonth(new Date().toISOString())}
+                        </span>
+                    </span>
+                    <button onClick={onClose} className="yl-ul" style={{ ...small, color: ink, padding: "10px 0 10px 16px" }}>
+                        閉じる
+                    </button>
+                </div>
+
+                <h2
+                    style={{
+                        margin: "16vh 0 0",
+                        fontFamily: MINCHO,
+                        fontWeight: 400,
+                        fontSize: 19,
+                        lineHeight: 2,
+                        letterSpacing: "0.1em",
+                        textAlign: "center",
+                        textWrap: "balance" as any,
+                    }}
+                >
+                    {question?.body}
+                </h2>
+
+                <form onSubmit={onSubmit} style={{ marginTop: 64, display: "flex", flexDirection: "column", gap: 18 }}>
+                    <input
+                        value={msg}
+                        onChange={(e) => setMsg(e.target.value.slice(0, 60))}
+                        placeholder="ひとこと（60字まで）"
+                        aria-label="ひとこと"
+                        enterKeyHint="next"
+                        style={{ ...field, fontFamily: MINCHO, borderBottom: `1px solid ${ink}` }}
+                    />
+                    <input
+                        value={nick}
+                        onChange={(e) => setNick(e.target.value.slice(0, 16))}
+                        placeholder="ニックネーム"
+                        aria-label="ニックネーム"
+                        enterKeyHint="send"
+                        style={{ ...field, borderBottom: `1px solid ${line}` }}
+                    />
+                    <input
+                        value={trap}
+                        onChange={(e) => setTrap(e.target.value)}
+                        tabIndex={-1}
+                        autoComplete="off"
+                        aria-hidden="true"
+                        name="website"
+                        style={{ position: "absolute", left: -9999, width: 1, height: 1, opacity: 0 }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+                        <span style={{ ...small, fontFamily: SERIF, fontStyle: "italic", fontSize: 13, letterSpacing: 0 }}>{msg.length}/60</span>
+                        <button
+                            type="submit"
+                            disabled={sending}
+                            style={{ fontSize: 13, letterSpacing: "0.2em", border: `1px solid ${ink}`, padding: "14px 30px", opacity: sending ? 0.4 : 1 }}
+                        >
+                            添える
+                        </button>
+                    </div>
+                    <div role="status" style={{ ...small, letterSpacing: "0.06em", textAlign: "center", minHeight: 18, marginTop: 6 }}>
+                        {note}
+                    </div>
+                </form>
+
+                <div style={{ marginTop: 120, textAlign: "center" }}>
+                    <span style={{ display: "inline-block", width: 1, height: 48, background: line }} />
+                    <div style={{ ...small, marginTop: 20 }}>
+                        届いた言葉
+                        <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, letterSpacing: 0, marginLeft: 10, color: ink }}>
+                            {list.filter((a) => !a.pending).length}
+                        </span>
+                    </div>
+                </div>
+
+                {list.length === 0 && (
+                    <p style={{ fontFamily: MINCHO, fontSize: 14, color: mute, lineHeight: 2.2, textAlign: "center", marginTop: 56 }}>
+                        まだ、どなたの言葉もありません。
+                        <br />
+                        最初のひとことを、お待ちしています。
+                    </p>
+                )}
+                <ul style={{ listStyle: "none", margin: "24px 0 0", padding: 0 }}>
+                    {list.map((a) => (
+                        <li key={a.id} style={{ textAlign: "center", padding: "52px 0" }}>
+                            <div style={{ fontFamily: MINCHO, fontSize: 16, lineHeight: 2, letterSpacing: "0.06em" }}>{a.body}</div>
+                            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14, marginTop: 10 }}>
+                                <span style={{ fontSize: 11, color: mute, letterSpacing: "0.08em" }}>— {a.nickname}</span>
+                                <LikeButton a={a} ink={ink} mute={mute} onLike={() => onLike(a.id)} />
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+            </div>
+        </div>
+    )
+}
 
 function Heart({ on, ink }: { on: boolean; ink: string }) {
     return (
