@@ -1,0 +1,457 @@
+// Yohaku no Niwa GIN — purchase.
+// A quiet line under the bottle. Before payment, one sheet asks for the date of birth
+// (二十歳未満の者の飲酒防止に関する表示基準: 申込画面に年齢記載欄と表示), the delivery region,
+// and a glance at the legal notice. Payment itself happens on Square's checkout link.
+import * as React from "react"
+import { createPortal } from "react-dom"
+import { addPropertyControls, ControlType, RenderTarget } from "framer"
+
+const FONT_HREF =
+    "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Shippori+Mincho:wght@400&family=Zen+Kaku+Gothic+New:wght@400&display=swap"
+
+const AGE_NOTICE = "20歳未満の者の飲酒は法律で禁止されています。"
+
+function ensureFonts() {
+    if (typeof document === "undefined") return
+    if (document.querySelector("link[data-yohaku-gin]")) return
+    const l = document.createElement("link")
+    l.rel = "stylesheet"
+    l.href = FONT_HREF
+    l.setAttribute("data-yohaku-gin", "")
+    document.head.appendChild(l)
+}
+
+type Props = {
+    name: string
+    accent: string
+    spec: string
+    price: string
+    releaseAt: string
+    releaseText: string
+    soldOut: boolean
+    previewOpen: boolean
+    regionALabel: string
+    regionAFee: string
+    regionAUrl: string
+    regionBLabel: string
+    regionBFee: string
+    regionBUrl: string
+    legalHref: string
+    paper: string
+    ink: string
+    mute: string
+    style?: React.CSSProperties
+}
+
+const serif = `"Cormorant Garamond", "Shippori Mincho", serif`
+const mincho = `"Shippori Mincho", serif`
+const gothic = `"Zen Kaku Gothic New", sans-serif`
+
+function ageOn(y: number, m: number, d: number, now: Date) {
+    let age = now.getFullYear() - y
+    const mm = now.getMonth() + 1
+    if (mm < m || (mm === m && now.getDate() < d)) age -= 1
+    return age
+}
+
+function validDate(y: number, m: number, d: number) {
+    if (!y || !m || !d) return false
+    const dt = new Date(y, m - 1, d)
+    return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d && y > 1900
+}
+
+/**
+ * @framerSupportedLayoutWidth fixed
+ * @framerSupportedLayoutHeight fixed
+ */
+export default function YohakuPurchase(props: Props) {
+    const {
+        name, accent, spec, price, releaseAt, releaseText, soldOut, previewOpen,
+        regionALabel, regionAFee, regionAUrl, regionBLabel, regionBFee, regionBUrl,
+        legalHref, paper, ink, mute,
+    } = props
+    const isCanvas = RenderTarget.current() === RenderTarget.canvas
+    const hostRef = React.useRef<HTMLDivElement>(null)
+    const [w, setW] = React.useState(1200)
+    const [now, setNow] = React.useState<Date | null>(null)
+    const [open, setOpen] = React.useState(false)
+
+    React.useEffect(() => {
+        ensureFonts()
+        setNow(new Date())
+        const el = hostRef.current
+        if (!el) return
+        const ro = new ResizeObserver(() => setW(el.getBoundingClientRect().width))
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [])
+
+    const phone = w < 760
+    const releaseTime = Date.parse(releaseAt)
+    const released = previewOpen || (now !== null && !isNaN(releaseTime) && now.getTime() >= releaseTime)
+    const canBuy = released && !soldOut
+
+    let buttonText = "購入する"
+    if (soldOut) buttonText = "完売いたしました"
+    else if (!released) buttonText = releaseText
+
+    return (
+        <div
+            ref={hostRef}
+            style={{
+                ...props.style,
+                width: "100%",
+                height: "100%",
+                background: paper,
+                color: ink,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: phone ? "72px 24px" : "96px 32px",
+                boxSizing: "border-box",
+                position: "relative",
+                overflow: "hidden",
+            }}
+        >
+            <div
+                style={{
+                    position: "absolute",
+                    left: phone ? 24 : 40,
+                    top: phone ? 32 : 48,
+                    fontFamily: gothic,
+                    fontSize: 11,
+                    letterSpacing: "0.18em",
+                    color: mute,
+                }}
+            >
+                (Purchase)
+            </div>
+
+            <div style={{ fontFamily: serif, fontWeight: 300, fontSize: phone ? 34 : 44, lineHeight: 1.1, textAlign: "center" }}>
+                {name} <span style={{ fontStyle: "italic" }}>{accent}</span>
+            </div>
+            <div style={{ fontFamily: gothic, fontSize: 12, letterSpacing: "0.12em", color: mute, marginTop: 14 }}>{spec}</div>
+            <div style={{ fontFamily: serif, fontSize: phone ? 22 : 26, marginTop: 28, letterSpacing: "0.04em" }}>
+                {price ? (
+                    <>
+                        ¥{price}
+                        <span style={{ fontFamily: gothic, fontSize: 11, color: mute, marginLeft: 8, letterSpacing: "0.1em" }}>税込・送料別</span>
+                    </>
+                ) : (
+                    <span style={{ fontFamily: gothic, fontSize: 12, color: mute, letterSpacing: "0.12em" }}>価格は発売前にお知らせします</span>
+                )}
+            </div>
+
+            <button
+                type="button"
+                disabled={!canBuy || isCanvas}
+                onClick={() => canBuy && setOpen(true)}
+                style={{
+                    marginTop: 40,
+                    minWidth: phone ? 220 : 260,
+                    padding: "16px 28px",
+                    background: "transparent",
+                    color: canBuy ? ink : mute,
+                    border: `1px solid ${canBuy ? ink : mute}`,
+                    borderRadius: 0,
+                    fontFamily: canBuy ? mincho : serif,
+                    fontStyle: canBuy ? "normal" : "italic",
+                    fontSize: canBuy ? 15 : 18,
+                    letterSpacing: canBuy ? "0.3em" : "0.06em",
+                    cursor: canBuy ? "pointer" : "default",
+                    transition: "background .4s ease, color .4s ease",
+                }}
+                onMouseEnter={(e) => {
+                    if (!canBuy) return
+                    e.currentTarget.style.background = ink
+                    e.currentTarget.style.color = paper
+                }}
+                onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent"
+                    e.currentTarget.style.color = canBuy ? ink : mute
+                }}
+            >
+                {buttonText}
+            </button>
+
+            <div style={{ fontFamily: gothic, fontSize: 13, color: ink, marginTop: 32, letterSpacing: "0.06em", textAlign: "center" }}>
+                {AGE_NOTICE}
+            </div>
+            <a
+                href={legalHref}
+                style={{ fontFamily: gothic, fontSize: 11, color: mute, marginTop: 12, letterSpacing: "0.1em", textDecoration: "none", borderBottom: `1px solid ${mute}55`, paddingBottom: 2 }}
+            >
+                特定商取引法に基づく表記・お届けについて
+            </a>
+
+            {open && typeof document !== "undefined"
+                ? createPortal(
+                      <Sheet
+                          onClose={() => setOpen(false)}
+                          phone={phone}
+                          regions={[
+                              { label: regionALabel, fee: regionAFee, url: regionAUrl },
+                              { label: regionBLabel, fee: regionBFee, url: regionBUrl },
+                          ].filter((r) => r.label)}
+                          legalHref={legalHref}
+                          paper={paper}
+                          ink={ink}
+                          mute={mute}
+                      />,
+                      document.body
+                  )
+                : null}
+        </div>
+    )
+}
+
+type Region = { label: string; fee: string; url: string }
+
+function Sheet(p: { onClose: () => void; phone: boolean; regions: Region[]; legalHref: string; paper: string; ink: string; mute: string }) {
+    const { onClose, phone, regions, legalHref, paper, ink, mute } = p
+    const [y, setY] = React.useState("")
+    const [m, setM] = React.useState("")
+    const [d, setD] = React.useState("")
+    const [region, setRegion] = React.useState(-1)
+    const [agreed, setAgreed] = React.useState(false)
+    const [shown, setShown] = React.useState(false)
+
+    React.useEffect(() => {
+        const t = requestAnimationFrame(() => setShown(true))
+        const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose()
+        window.addEventListener("keydown", onKey)
+        const prev = document.body.style.overflow
+        document.body.style.overflow = "hidden"
+        return () => {
+            cancelAnimationFrame(t)
+            window.removeEventListener("keydown", onKey)
+            document.body.style.overflow = prev
+        }
+    }, [])
+
+    const yn = parseInt(y, 10), mn = parseInt(m, 10), dn = parseInt(d, 10)
+    const filled = y.length === 4 && m !== "" && d !== ""
+    const valid = validDate(yn, mn, dn)
+    const age = valid ? ageOn(yn, mn, dn, new Date()) : -1
+    const adult = valid && age >= 20
+    const under = valid && age < 20
+    const url = region >= 0 ? regions[region]?.url : ""
+    const ready = adult && region >= 0 && agreed && !!url
+
+    const input: React.CSSProperties = {
+        width: "100%",
+        boxSizing: "border-box",
+        padding: "12px 0 8px",
+        border: "none",
+        borderBottom: `1px solid ${ink}`,
+        background: "transparent",
+        color: ink,
+        fontFamily: serif,
+        fontSize: 22,
+        textAlign: "center",
+        outline: "none",
+        borderRadius: 0,
+    }
+    const small: React.CSSProperties = { fontFamily: gothic, fontSize: 11, color: mute, letterSpacing: "0.12em" }
+    const digits = (v: string, n: number) => v.replace(/[^0-9０-９]/g, "").replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).slice(0, n)
+
+    return (
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="ご購入の前に"
+            onClick={onClose}
+            style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 1000,
+                background: "rgba(17,17,17,0.42)",
+                display: "flex",
+                alignItems: phone ? "flex-end" : "center",
+                justifyContent: "center",
+                opacity: shown ? 1 : 0,
+                transition: "opacity .5s ease",
+            }}
+        >
+            <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                    width: phone ? "100%" : 480,
+                    maxHeight: phone ? "92vh" : "90vh",
+                    overflowY: "auto",
+                    background: paper,
+                    color: ink,
+                    padding: phone ? "40px 24px 32px" : "56px 56px 44px",
+                    boxSizing: "border-box",
+                    transform: shown ? "none" : phone ? "translateY(40px)" : "translateY(12px)",
+                    transition: "transform .6s cubic-bezier(.2,.7,.2,1)",
+                    position: "relative",
+                }}
+            >
+                <button
+                    type="button"
+                    onClick={onClose}
+                    aria-label="閉じる"
+                    style={{ position: "absolute", right: 20, top: 16, background: "none", border: "none", color: mute, fontFamily: serif, fontStyle: "italic", fontSize: 16, cursor: "pointer" }}
+                >
+                    close
+                </button>
+
+                <div style={{ ...small, fontFamily: serif, fontStyle: "italic", fontSize: 15, letterSpacing: "0.04em" }}>(Before you buy)</div>
+                <div style={{ fontFamily: mincho, fontSize: 22, marginTop: 10, letterSpacing: "0.08em" }}>ご購入の前に</div>
+                <p style={{ fontFamily: gothic, fontSize: 13, lineHeight: 1.9, marginTop: 20, marginBottom: 0 }}>
+                    20歳未満の方には、酒類を販売いたしません。
+                    <br />
+                    生年月日をご入力ください。
+                </p>
+
+                <div style={{ ...small, marginTop: 28 }}>生年月日（必須）</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1.6fr auto 1fr auto 1fr auto", alignItems: "end", gap: 8, marginTop: 4 }}>
+                    <input aria-label="年" inputMode="numeric" placeholder="1990" value={y} onChange={(e) => setY(digits(e.target.value, 4))} style={input} />
+                    <span style={small}>年</span>
+                    <input aria-label="月" inputMode="numeric" placeholder="1" value={m} onChange={(e) => setM(digits(e.target.value, 2))} style={input} />
+                    <span style={small}>月</span>
+                    <input aria-label="日" inputMode="numeric" placeholder="1" value={d} onChange={(e) => setD(digits(e.target.value, 2))} style={input} />
+                    <span style={small}>日</span>
+                </div>
+                <div style={{ fontFamily: gothic, fontSize: 13, marginTop: 14, letterSpacing: "0.04em" }}>{AGE_NOTICE}</div>
+                {filled && !valid ? <div style={{ ...small, marginTop: 8 }}>日付をご確認ください。</div> : null}
+                {under ? (
+                    <div style={{ fontFamily: gothic, fontSize: 13, lineHeight: 1.9, marginTop: 16 }}>
+                        申し訳ございません。
+                        <br />
+                        20歳未満の方にはお売りすることができません。
+                    </div>
+                ) : null}
+
+                <div style={{ opacity: adult ? 1 : 0.35, pointerEvents: adult ? "auto" : "none", transition: "opacity .5s ease" }}>
+                    <div style={{ ...small, marginTop: 32 }}>お届け先の地域</div>
+                    <div style={{ marginTop: 6 }}>
+                        {regions.map((r, i) => (
+                            <label
+                                key={i}
+                                style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    padding: "14px 0",
+                                    borderBottom: `1px solid ${mute}44`,
+                                    cursor: "pointer",
+                                    fontFamily: gothic,
+                                    fontSize: 13,
+                                }}
+                            >
+                                <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                    <span
+                                        style={{
+                                            width: 11,
+                                            height: 11,
+                                            borderRadius: "50%",
+                                            border: `1px solid ${ink}`,
+                                            background: region === i ? ink : "transparent",
+                                            transition: "background .3s",
+                                        }}
+                                    />
+                                    <input type="radio" name="yohaku-region" checked={region === i} onChange={() => setRegion(i)} style={{ position: "absolute", opacity: 0, pointerEvents: "none" }} />
+                                    {r.label}
+                                </span>
+                                <span style={{ color: mute, fontSize: 12 }}>送料 ¥{r.fee}</span>
+                            </label>
+                        ))}
+                    </div>
+
+                    <label style={{ display: "flex", gap: 12, alignItems: "flex-start", marginTop: 22, cursor: "pointer", fontFamily: gothic, fontSize: 12, lineHeight: 1.8 }}>
+                        <span
+                            style={{
+                                flex: "none",
+                                width: 11,
+                                height: 11,
+                                marginTop: 5,
+                                border: `1px solid ${ink}`,
+                                background: agreed ? ink : "transparent",
+                                transition: "background .3s",
+                            }}
+                        />
+                        <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} style={{ position: "absolute", opacity: 0, pointerEvents: "none" }} />
+                        <span>
+                            <a href={legalHref} target="_blank" rel="noopener" style={{ color: ink }}>
+                                特定商取引法に基づく表記
+                            </a>
+                            （お届け・返品・取消について）を確認しました。
+                        </span>
+                    </label>
+                </div>
+
+                <button
+                    type="button"
+                    disabled={!ready}
+                    onClick={() => {
+                        if (ready && url) window.location.href = url
+                    }}
+                    style={{
+                        width: "100%",
+                        marginTop: 32,
+                        padding: "17px 0",
+                        background: ready ? ink : "transparent",
+                        color: ready ? paper : mute,
+                        border: `1px solid ${ready ? ink : mute + "88"}`,
+                        borderRadius: 0,
+                        fontFamily: mincho,
+                        fontSize: 15,
+                        letterSpacing: "0.3em",
+                        cursor: ready ? "pointer" : "default",
+                        transition: "background .4s, color .4s",
+                    }}
+                >
+                    {region >= 0 && !url ? "準備中です" : "お支払いへ"}
+                </button>
+                <div style={{ ...small, marginTop: 14, lineHeight: 1.8, textAlign: "center" }}>
+                    お支払いは Square の決済画面で行います。
+                </div>
+            </div>
+        </div>
+    )
+}
+
+YohakuPurchase.defaultProps = {
+    name: "Yohaku no Niwa",
+    accent: "Gin",
+    spec: "500ml / 40% vol — Forest Distilled Gin",
+    price: "",
+    releaseAt: "2026-11-28T00:00:00+09:00",
+    releaseText: "Nov 28th — 発売",
+    soldOut: false,
+    previewOpen: false,
+    regionALabel: "本州・四国・九州",
+    regionAFee: "1,100",
+    regionAUrl: "",
+    regionBLabel: "北海道・沖縄・離島",
+    regionBFee: "1,800",
+    regionBUrl: "",
+    legalHref: "/legal",
+    paper: "#F7F7F5",
+    ink: "#111111",
+    mute: "#8C8B87",
+}
+
+addPropertyControls(YohakuPurchase, {
+    name: { type: ControlType.String, title: "Name" },
+    accent: { type: ControlType.String, title: "Accent" },
+    spec: { type: ControlType.String, title: "Spec" },
+    price: { type: ControlType.String, title: "Price (税込)", placeholder: "例 8,800" },
+    releaseAt: { type: ControlType.String, title: "Release at" },
+    releaseText: { type: ControlType.String, title: "Before release" },
+    soldOut: { type: ControlType.Boolean, title: "Sold out" },
+    previewOpen: { type: ControlType.Boolean, title: "Open early (test)" },
+    regionALabel: { type: ControlType.String, title: "Region A" },
+    regionAFee: { type: ControlType.String, title: "Region A fee" },
+    regionAUrl: { type: ControlType.String, title: "Region A Square link" },
+    regionBLabel: { type: ControlType.String, title: "Region B" },
+    regionBFee: { type: ControlType.String, title: "Region B fee" },
+    regionBUrl: { type: ControlType.String, title: "Region B Square link" },
+    legalHref: { type: ControlType.String, title: "Legal page" },
+    paper: { type: ControlType.Color, title: "Paper" },
+    ink: { type: ControlType.Color, title: "Ink" },
+    mute: { type: ControlType.Color, title: "Mute" },
+})
