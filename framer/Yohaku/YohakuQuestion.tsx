@@ -1,0 +1,1234 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import { addPropertyControls, ControlType, RenderTarget } from "framer"
+
+/**
+ * 今月の問い — one question a month, set in the middle of a white field.
+ * Visitors leave a nickname and a few words; the words surface around
+ * the question one by one, linger, and sink back into the white.
+ *
+ * Storage: Supabase (see monthly-question/supabase/schema.sql).
+ * Without a Supabase URL/key the component runs in preview mode with
+ * sample words kept only in this browser.
+ *
+ * @framerSupportedLayoutWidth fixed
+ * @framerSupportedLayoutHeight fixed
+ * @framerIntrinsicWidth 1200
+ * @framerIntrinsicHeight 860
+ */
+
+type Answer = {
+    id: string
+    nickname: string
+    body: string
+    likes: number
+    liked: boolean
+    mine?: boolean
+    createdAt?: string
+    pending?: boolean
+}
+type Question = { id: number; month: string; body: string; imageUrl?: string | null }
+type ArchiveItem = {
+    month: string
+    body: string
+    imageUrl?: string | null
+    total: number
+    top: { nickname: string; body: string; likes: number }[]
+}
+
+const MINCHO = `"Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif`
+const SANS = `"Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif`
+const SERIF = `"Instrument Serif", "Cormorant Garamond", Georgia, serif`
+
+/* ───────────────────────── data ───────────────────────── */
+
+function voterId(): string {
+    const k = "yl-voter"
+    try {
+        const v = localStorage.getItem(k)
+        if (v) return v
+    } catch {}
+    const id =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+                  const r = (Math.random() * 16) | 0
+                  return (c === "x" ? r : (r & 0x3) | 0x8).toString(16)
+              })
+    try {
+        localStorage.setItem(k, id)
+    } catch {}
+    return id
+}
+
+type Api = {
+    current(): Promise<{ question: Question | null; answers: Answer[] }>
+    submit(qid: number, nickname: string, body: string, trap: string): Promise<{ status: string; answer: Answer | null }>
+    like(id: string): Promise<{ likes: number; liked: boolean }>
+    archive(): Promise<ArchiveItem[]>
+}
+
+function supabaseApi(url: string, key: string, voter: string): Api {
+    const base = url.replace(/\/+$/, "")
+    const headers: Record<string, string> = { apikey: key, "Content-Type": "application/json" }
+    // legacy anon keys are JWTs; new publishable keys (sb_publishable_…) go in apikey only
+    if (!key.startsWith("sb_")) headers.Authorization = `Bearer ${key}`
+    const rpc = async (fn: string, body: object) => {
+        let r: Response
+        try {
+            r = await fetch(`${base}/rest/v1/rpc/${fn}`, { method: "POST", headers, body: JSON.stringify(body) })
+        } catch {
+            throw new Error("通信がうまくいきませんでした。")
+        }
+        const j = await r.json().catch(() => null)
+        if (!r.ok) throw new Error((j && j.hint) || "うまく届きませんでした。少し時間をおいて、もう一度どうぞ。")
+        return j
+    }
+    return {
+        current: () => rpc("yl_current", { p_voter: voter }),
+        submit: async (qid, nickname, body, trap) =>
+            rpc("yl_submit", { p_question_id: qid, p_nickname: nickname, p_body: body, p_voter: voter, p_trap: trap }),
+        like: (id) => rpc("yl_like", { p_answer: id, p_voter: voter }),
+        archive: () => rpc("yl_archive", { p_limit: 3 }),
+    }
+}
+
+const SAMPLE: [string, string, number][] = [
+    ["朝、障子に落ちた光の四角", "みどり", 12],
+    ["雨上がりの土の匂い", "tomo", 9],
+    ["祖母が柿をむく手つき", "ゆう", 15],
+    ["誰もいない駅のホームの静けさ", "k.", 4],
+    ["湯気の向こうに見えた、父の横顔", "はる", 7],
+    ["欠けた器を金で継いだ跡", "sora", 11],
+    ["夕方五時、窓辺の影がのびる時間", "nao", 3],
+    ["霜の降りた朝の、白い息", "いち", 6],
+    ["読みかけの本にはさんだ落ち葉", "mio", 5],
+    ["冬の川面に映る、ゆれる街灯", "ren", 2],
+]
+
+function demoApi(question: string): Api {
+    const key = "yl-demo-v1"
+    const load = (): Answer[] => {
+        try {
+            const s = localStorage.getItem(key)
+            if (s) return JSON.parse(s)
+        } catch {}
+        return SAMPLE.map(([body, nickname, likes], i) => ({
+            id: `demo-${i}`,
+            body,
+            nickname,
+            likes,
+            liked: false,
+            createdAt: new Date(Date.now() - i * 3600e3).toISOString(),
+        }))
+    }
+    const save = (a: Answer[]) => {
+        try {
+            localStorage.setItem(key, JSON.stringify(a))
+        } catch {}
+    }
+    let list = load()
+    const now = new Date()
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
+    return {
+        current: async () => ({ question: { id: 0, month, body: question }, answers: list }),
+        submit: async (_q, nickname, body) => {
+            const a: Answer = {
+                id: `demo-${Date.now()}`,
+                nickname: nickname.trim(),
+                body: body.trim(),
+                likes: 0,
+                liked: false,
+                mine: true,
+                createdAt: new Date().toISOString(),
+            }
+            list = [a, ...list]
+            save(list)
+            return { status: "visible", answer: a }
+        },
+        like: async (id) => {
+            let res = { likes: 0, liked: false }
+            list = list.map((a) => {
+                if (a.id !== id) return a
+                const liked = !a.liked
+                const likes = Math.max(0, a.likes + (liked ? 1 : -1))
+                res = { likes, liked }
+                return { ...a, liked, likes }
+            })
+            save(list)
+            return res
+        },
+        archive: async () => [
+            {
+                month: "2026-10-01",
+                body: "（プレビュー）先月の問いがここに並びます",
+                total: 3,
+                top: [
+                    { nickname: "みどり", body: "いいねの多かった言葉から、三つ", likes: 21 },
+                    { nickname: "tomo", body: "順に静かに並びます", likes: 14 },
+                    { nickname: "ゆう", body: "月がかわると、問いもかわる", likes: 8 },
+                ],
+            },
+        ],
+    }
+}
+
+/* ───────────────────────── layout ───────────────────────── */
+
+// anchor points (x%, y%) around the question; the centre stays empty
+const SLOTS_WIDE: [number, number][] = [
+    [16, 25], [40, 18], [66, 20], [84, 29],
+    [12, 50], [83, 54],
+    [17, 75], [40, 84], [64, 82], [84, 72],
+]
+const SLOTS_NARROW: [number, number][] = [
+    [32, 18], [62, 29],
+    [36, 71], [62, 83],
+]
+
+const fmtMonth = (m?: string) => (m ? m.slice(0, 7).replace("-", ".") : "")
+const shuffle = <T,>(a: T[]) => {
+    const b = a.slice()
+    for (let i = b.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0
+        ;[b[i], b[j]] = [b[j], b[i]]
+    }
+    return b
+}
+
+type Float = {
+    key: number
+    id: string
+    slot: number
+    out: boolean
+    ax: number // sway, px
+    ay: number // rise and fall, px
+    rot: number // lean, deg
+    dur: number // slow drift, s
+    bob: number // quicker breath, s
+    phase: number // 0..1, so no two words move together
+    delay: number
+}
+
+/* ───────────────────────── component ───────────────────────── */
+
+export default function YohakuQuestion(props) {
+    const { supabaseUrl, supabaseKey, fallbackQuestion, paper, ink, mute, line, style } = props
+    const isCanvas = RenderTarget.current() === RenderTarget.canvas
+    const preview = !supabaseUrl || !supabaseKey
+
+    const rootRef = useRef<HTMLDivElement>(null)
+    const [w, setW] = useState(1200)
+    const narrow = w < 720
+    const slots = narrow ? SLOTS_NARROW : SLOTS_WIDE
+
+    const api = useMemo<Api | null>(() => {
+        if (typeof window === "undefined") return null
+        return preview ? demoApi(fallbackQuestion) : supabaseApi(supabaseUrl, supabaseKey, voterId())
+    }, [preview, supabaseUrl, supabaseKey, fallbackQuestion])
+
+    const [question, setQuestion] = useState<Question | null>({ id: 0, month: "", body: fallbackQuestion })
+    const [answers, setAnswers] = useState<Answer[]>([])
+    const [loaded, setLoaded] = useState(false)
+    const [conn, setConn] = useState<"wait" | "ok" | "error" | "empty">("wait")
+    const [panel, setPanel] = useState<null | "all" | "archive">(null)
+    const [form, setForm] = useState(false)
+    const [reduced, setReduced] = useState(false)
+
+    useEffect(() => {
+        const el = rootRef.current
+        setReduced(window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+        if (!el) return
+        const ro = new ResizeObserver(([e]) => setW(e.contentRect.width))
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [])
+
+    useEffect(() => {
+        if (!api) return
+        let alive = true
+        api.current()
+            .then((d) => {
+                if (!alive) return
+                if (d.question) setQuestion(d.question)
+                setConn(d.question ? "ok" : "empty")
+                setAnswers(d.answers || [])
+            })
+            .catch(() => alive && setConn("error"))
+            .finally(() => alive && setLoaded(true))
+        return () => {
+            alive = false
+        }
+    }, [api])
+
+    useEffect(() => {
+        if (!panel) return
+        const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPanel(null)
+        window.addEventListener("keydown", onKey)
+        return () => window.removeEventListener("keydown", onKey)
+    }, [panel])
+
+    const visible = useMemo(() => answers.filter((a) => !a.pending), [answers])
+    const byId = useMemo(() => new Map(answers.map((a) => [a.id, a])), [answers])
+
+    /* ── likes ── */
+    const busy = useRef(new Set<string>())
+    const toggleLike = useCallback(
+        async (id: string) => {
+            if (!api || busy.current.has(id)) return
+            const a = byId.get(id)
+            if (!a || a.pending) return
+            busy.current.add(id)
+            const optimistic = { liked: !a.liked, likes: Math.max(0, a.likes + (a.liked ? -1 : 1)) }
+            setAnswers((l) => l.map((x) => (x.id === id ? { ...x, ...optimistic } : x)))
+            try {
+                const r = await api.like(id)
+                setAnswers((l) => l.map((x) => (x.id === id ? { ...x, ...r } : x)))
+            } catch {
+                setAnswers((l) => l.map((x) => (x.id === id ? { ...x, liked: a.liked, likes: a.likes } : x)))
+            } finally {
+                busy.current.delete(id)
+            }
+        },
+        [api, byId]
+    )
+
+    /* ── floating words ── */
+    const [floats, setFloats] = useState<Float[]>([])
+    const hovered = useRef<string | null>(null)
+    const queue = useRef<string[]>([])
+    const seq = useRef(0)
+    const priority = useRef<string | null>(null)
+
+    const nextId = useCallback(
+        (exclude: Set<string>) => {
+            if (priority.current && !exclude.has(priority.current)) {
+                const p = priority.current
+                priority.current = null
+                return p
+            }
+            for (let guard = 0; guard < 2; guard++) {
+                while (queue.current.length) {
+                    const id = queue.current.shift()!
+                    if (!exclude.has(id) && byId.has(id)) return id
+                }
+                // refill: favour words with more likes, but keep the order loose
+                queue.current = shuffle(visible)
+                    .sort((a, b) => b.likes * Math.random() - a.likes * Math.random())
+                    .map((a) => a.id)
+            }
+            return null
+        },
+        [visible, byId]
+    )
+
+    const spawn = useCallback(
+        (slot: number, id: string, delay = 0): Float => ({
+            key: ++seq.current,
+            id,
+            slot,
+            out: false,
+            ax: (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 10),
+            ay: 9 + Math.random() * 9,
+            rot: (Math.random() - 0.5) * 2.4,
+            dur: 16 + Math.random() * 10,
+            bob: 5.5 + Math.random() * 3,
+            phase: Math.random(),
+            delay,
+        }),
+        []
+    )
+
+    // initial fill / refill when the slot count or data changes
+    useEffect(() => {
+        if (!loaded) return
+        setFloats((cur) => {
+            const keep = cur.filter((f) => f.slot < slots.length && byId.has(f.id))
+            const used = new Set(keep.map((f) => f.id))
+            const free = shuffle(slots.map((_, i) => i).filter((i) => !keep.some((f) => f.slot === i)))
+            const want = Math.min(slots.length, visible.length)
+            const out = keep.slice()
+            for (const s of free) {
+                if (out.filter((f) => !f.out).length >= want) break
+                const id = nextId(used)
+                if (!id) break
+                used.add(id)
+                // on first appearance the words rise one after another
+                out.push(spawn(s, id, keep.length ? 0 : 0.3 + (out.length - keep.length) * 0.45))
+            }
+            return out
+        })
+    }, [loaded, slots, visible.length, byId, nextId, spawn])
+
+    // rotation: one word sinks, another rises
+    useEffect(() => {
+        if (isCanvas || !loaded || visible.length <= slots.length) return
+        const t = setInterval(() => {
+            setFloats((cur) => {
+                const live = cur.filter((f) => !f.out && f.id !== hovered.current)
+                if (!live.length) return cur
+                const old = live.reduce((a, b) => (a.key < b.key ? a : b))
+                const used = new Set(cur.map((f) => f.id))
+                const id = nextId(used)
+                if (!id) return cur
+                const next = cur.map((f) => (f.key === old.key ? { ...f, out: true } : f))
+                next.push(spawn(old.slot, id))
+                return next
+            })
+        }, 3200)
+        return () => clearInterval(t)
+    }, [isCanvas, loaded, visible.length, slots.length, nextId, spawn])
+
+    // drop words that have finished fading out
+    useEffect(() => {
+        if (!floats.some((f) => f.out)) return
+        const t = setTimeout(() => setFloats((cur) => cur.filter((f) => !f.out)), 1800)
+        return () => clearTimeout(t)
+    }, [floats])
+
+    /* ── submit ── */
+    const [nick, setNick] = useState("")
+    const [msg, setMsg] = useState("")
+    const [trap, setTrap] = useState("")
+    const [sending, setSending] = useState(false)
+    const [note, setNote] = useState("")
+
+    useEffect(() => {
+        try {
+            const n = localStorage.getItem("yl-nickname")
+            if (n) setNick(n)
+        } catch {}
+    }, [])
+
+    const submit = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!api || !question || sending) return
+        const n = nick.trim()
+        const m = msg.trim()
+        if (!n || !m) {
+            setNote("ニックネームと、ひとことを。")
+            return
+        }
+        setSending(true)
+        setNote("")
+        try {
+            const r = await api.submit(question.id, n, m, trap)
+            try {
+                localStorage.setItem("yl-nickname", n)
+            } catch {}
+            setMsg("")
+            if (r.status === "visible" && r.answer) {
+                setAnswers((l) => [r.answer!, ...l])
+                priority.current = r.answer.id
+                setNote("言葉が届きました。")
+                // let the new words rise right away
+                setFloats((cur) => {
+                    const live = cur.filter((f) => !f.out)
+                    const free = slots.map((_, i) => i).filter((i) => !live.some((f) => f.slot === i))
+                    if (free.length) {
+                        priority.current = null
+                        return [...cur, spawn(free[(Math.random() * free.length) | 0], r.answer!.id)]
+                    }
+                    const old = live.reduce((a, b) => (a.key < b.key ? a : b))
+                    priority.current = null
+                    return [...cur.map((f) => (f.key === old.key ? { ...f, out: true } : f)), spawn(old.slot, r.answer!.id)]
+                })
+                if (!narrow) setTimeout(() => setForm(false), 1400)
+            } else {
+                if (r.answer) setAnswers((l) => [{ ...r.answer!, pending: true }, ...l])
+                setNote("受け取りました。確かめたのち、ここに浮かびます。")
+            }
+        } catch (err: any) {
+            setNote(err?.message || "うまく届きませんでした。")
+        } finally {
+            setSending(false)
+        }
+    }
+
+    // desktop: focus the first field without scrolling the page
+    const msgRef = useRef<HTMLInputElement>(null)
+    useEffect(() => {
+        if (form && !narrow) msgRef.current?.focus({ preventScroll: true })
+    }, [form, narrow])
+
+    // phone: the writing sheet covers the screen; hold the page still underneath
+    // so the keyboard can't push it anywhere
+    const sheet = narrow && form && !isCanvas
+    useEffect(() => {
+        if (!sheet) return
+        const y = window.scrollY
+        const b = document.body
+        const h = document.documentElement
+        const prev = { pos: b.style.position, top: b.style.top, w: b.style.width, ov: h.style.overflow }
+        b.style.position = "fixed"
+        b.style.top = `-${y}px`
+        b.style.width = "100%"
+        h.style.overflow = "hidden"
+        const onKey = (e: KeyboardEvent) => e.key === "Escape" && setForm(false)
+        window.addEventListener("keydown", onKey)
+        return () => {
+            b.style.position = prev.pos
+            b.style.top = prev.top
+            b.style.width = prev.w
+            h.style.overflow = prev.ov
+            window.scrollTo(0, y)
+            window.removeEventListener("keydown", onKey)
+        }
+    }, [sheet])
+
+    /* ── archive ── */
+    const [archive, setArchive] = useState<ArchiveItem[] | null>(null)
+    const openArchive = async () => {
+        setPanel("archive")
+        if (archive || !api) return
+        try {
+            setArchive(await api.archive())
+        } catch {
+            setArchive([])
+        }
+    }
+
+    /* ── render ── */
+    const qSize = narrow ? Math.max(18, Math.min(21, w * 0.052)) : Math.max(34, Math.min(56, w * 0.038))
+    const count = visible.length
+
+    const css = `
+    @keyframes ylIn { from { opacity: 0; filter: blur(6px) } to { opacity: 1; filter: blur(0) } }
+    @keyframes ylOut { from { opacity: 1; filter: blur(0) } to { opacity: 0; filter: blur(6px) } }
+    @keyframes ylDrift {
+        0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg) }
+        25% { transform: translate3d(var(--ax), calc(var(--ay) * -0.7), 0) rotate(var(--r)) }
+        50% { transform: translate3d(calc(var(--ax) * 0.35), calc(var(--ay) * -1), 0) rotate(0deg) }
+        75% { transform: translate3d(calc(var(--ax) * -0.6), calc(var(--ay) * -0.35), 0) rotate(calc(var(--r) * -1)) }
+    }
+    @keyframes ylBob { from { transform: translate3d(0, 3px, 0) } to { transform: translate3d(0, -3px, 0) } }
+    .yl-q .yl-w:hover .yl-drift, .yl-q .yl-w:focus-within .yl-drift { animation-play-state: paused }
+    @keyframes ylFade { from { opacity: 0 } to { opacity: 1 } }
+    .yl-q * { box-sizing: border-box }
+    .yl-q button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer }
+    .yl-q input { font: inherit; color: inherit; background: transparent; border: 0; outline: none; border-radius: 0 }
+    .yl-q input::placeholder { color: ${mute} }
+    .yl-q .yl-ul { background-image: linear-gradient(currentColor, currentColor); background-size: 0% 1px; background-repeat: no-repeat; background-position: 0 100%; transition: background-size .6s cubic-bezier(.2,.7,.2,1) }
+    .yl-q .yl-ul:hover, .yl-q .yl-ul:focus-visible { background-size: 100% 1px }
+    .yl-q .yl-scroll::-webkit-scrollbar { width: 0 }
+    .yl-q :focus-visible { outline: 1px solid ${ink}; outline-offset: 4px }
+    .yl-q input:focus-visible { outline: none }
+    `
+
+    const label: React.CSSProperties = {
+        fontFamily: SANS,
+        fontSize: 11,
+        letterSpacing: "0.14em",
+        color: mute,
+    }
+
+    return (
+        <div
+            ref={rootRef}
+            className="yl-q"
+            style={{
+                ...style,
+                position: "relative",
+                width: "100%",
+                height: "100%",
+                minHeight: 560,
+                background: paper,
+                color: ink,
+                overflow: "hidden",
+                fontFamily: SANS,
+            }}
+        >
+            <style>{css}</style>
+
+            {/* label row — kept at the bottom so the site's fixed header stays clear */}
+            <div
+                style={{
+                    position: "absolute",
+                    bottom: narrow ? 22 : 36,
+                    left: narrow ? 20 : 48,
+                    right: narrow ? 20 : 48,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    zIndex: 3,
+                }}
+            >
+                <div style={label}>
+                    今月の問い
+                    <span style={{ fontFamily: SERIF, fontStyle: "italic", letterSpacing: "0.02em", fontSize: 14, marginLeft: 12, color: ink }}>
+                        {fmtMonth(question?.month) || fmtMonth(new Date().toISOString())}
+                    </span>
+                    {!narrow && (
+                        <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, letterSpacing: "0.02em", marginLeft: 20 }}>
+                            A question for this month
+                        </span>
+                    )}
+                    {preview && <span style={{ marginLeft: 12 }}>（プレビュー）</span>}
+                    {/* connection status, shown only inside the Framer editor */}
+                    {!preview && isCanvas && (
+                        <span style={{ marginLeft: 12 }}>
+                            {
+                                {
+                                    wait: "（Supabase 接続中…）",
+                                    ok: "（Supabase 接続済み）",
+                                    empty: "（Supabase 接続済み・今月の問いが未登録）",
+                                    error: "（Supabase に接続できません。SQL の実行とキーを確認）",
+                                }[conn]
+                            }
+                        </span>
+                    )}
+                </div>
+                <button className="yl-ul" style={{ ...label, color: ink, padding: "10px 0" }} onClick={openArchive}>
+                    これまでの問い
+                </button>
+            </div>
+
+            {/* floating words */}
+            <div
+                aria-hidden={panel ? true : undefined}
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 1,
+                    // on phones the words step back while someone is writing
+                    opacity: narrow && form ? 0.12 : 1,
+                    transition: "opacity .8s ease",
+                }}
+            >
+                {floats.map((f) => {
+                    const a = byId.get(f.id)
+                    if (!a) return null
+                    const [x, y] = slots[f.slot] || [50, 50]
+                    return (
+                        <div
+                            key={f.key}
+                            className="yl-w"
+                            onPointerEnter={() => (hovered.current = f.id)}
+                            onPointerLeave={() => hovered.current === f.id && (hovered.current = null)}
+                            style={{
+                                position: "absolute",
+                                left: `${x}%`,
+                                top: `${y}%`,
+                                transform: "translate(-50%, -50%)",
+                                width: "max-content",
+                                maxWidth: narrow ? "42vw" : 260,
+                            }}
+                        >
+                            <div
+                                style={{
+                                    animation: isCanvas
+                                        ? undefined
+                                        : f.out
+                                          ? `ylOut ${reduced ? 1.2 : 1.6}s ease forwards`
+                                          : `ylIn ${reduced ? 1.2 : 2.2}s cubic-bezier(.2,.6,.2,1) ${f.delay}s forwards`,
+                                    opacity: isCanvas ? 1 : 0,
+                                }}
+                            >
+                                {/* two slow motions at different tempos: a wandering drift and a
+                                    small breath, so the words seem to float rather than loop.
+                                    Both rest while the pointer is on a word. */}
+                                <div
+                                    className="yl-drift"
+                                    style={
+                                        {
+                                            "--ax": `${f.ax * (narrow ? 0.55 : 1)}px`,
+                                            "--ay": `${f.ay * (narrow ? 0.6 : 1)}px`,
+                                            "--r": `${f.rot}deg`,
+                                            animation:
+                                                reduced || isCanvas
+                                                    ? undefined
+                                                    : `ylDrift ${f.dur}s cubic-bezier(.45,0,.55,1) ${-f.phase * f.dur}s infinite`,
+                                            willChange: reduced || isCanvas ? undefined : "transform",
+                                        } as React.CSSProperties
+                                    }
+                                >
+                                    <div
+                                        className="yl-drift"
+                                        style={{
+                                            animation:
+                                                reduced || isCanvas
+                                                    ? undefined
+                                                    : `ylBob ${f.bob}s ease-in-out ${-f.phase * f.bob * 2}s infinite alternate`,
+                                        }}
+                                    >
+                                        <Word a={a} ink={ink} mute={mute} narrow={narrow} onLike={() => toggleLike(a.id)} />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )
+                })}
+            </div>
+
+            {/* the question */}
+            <div
+                style={{
+                    position: "absolute",
+                    left: "50%",
+                    top: "50%",
+                    transform: "translate(-50%, -50%)",
+                    width: narrow ? "calc(100% - 128px)" : "min(46%, 640px)",
+                    textAlign: "center",
+                    zIndex: 2,
+                    pointerEvents: "none",
+                }}
+            >
+                {question?.imageUrl && (
+                    <img
+                        src={question.imageUrl}
+                        alt=""
+                        style={{ display: "block", width: narrow ? 160 : 220, margin: "0 auto 36px", filter: "grayscale(1)" }}
+                    />
+                )}
+                <h2
+                    style={{
+                        margin: 0,
+                        fontFamily: MINCHO,
+                        fontWeight: 400,
+                        fontSize: qSize,
+                        lineHeight: 1.6,
+                        letterSpacing: "0.08em",
+                        textWrap: "balance" as any,
+                        color: ink,
+                    }}
+                >
+                    {question?.body}
+                </h2>
+
+                <div style={{ marginTop: narrow ? 28 : 40, pointerEvents: "auto" }}>
+                    {!form || narrow ? (
+                        <button
+                            onClick={() => {
+                                setForm(true)
+                                setNote("")
+                            }}
+                            style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 14,
+                                fontSize: 13,
+                                letterSpacing: "0.16em",
+                                padding: narrow ? "16px 12px" : "8px 4px",
+                            }}
+                        >
+                            <span style={{ display: "inline-block", width: 32, height: 1, background: ink }} />
+                            <span className="yl-ul">ひとこと添える</span>
+                        </button>
+                    ) : (
+                        <form
+                            onSubmit={submit}
+                            style={{
+                                animation: "ylFade .6s ease",
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                gap: 14,
+                                width: narrow ? "min(340px, calc(100vw - 48px))" : 420,
+                                position: "relative",
+                                left: "50%",
+                                transform: "translateX(-50%)",
+                                background: paper,
+                                padding: "6px 0",
+                            }}
+                        >
+                            <input
+                                value={msg}
+                                onChange={(e) => setMsg(e.target.value.slice(0, 60))}
+                                placeholder="ひとこと（60字まで）"
+                                aria-label="ひとこと"
+                                ref={msgRef}
+                                style={{
+                                    width: "100%",
+                                    fontFamily: MINCHO,
+                                    fontSize: narrow ? 16 : 17,
+                                    textAlign: "center",
+                                    padding: "8px 0",
+                                    borderBottom: `1px solid ${ink}`,
+                                }}
+                            />
+                            <div style={{ display: "flex", width: "100%", gap: 16, alignItems: "center" }}>
+                                <input
+                                    value={nick}
+                                    onChange={(e) => setNick(e.target.value.slice(0, 16))}
+                                    placeholder="ニックネーム"
+                                    aria-label="ニックネーム"
+                                    style={{
+                                        flex: 1,
+                                        fontSize: 16,
+                                        padding: narrow ? "12px 0" : "6px 0",
+                                        borderBottom: `1px solid ${line}`,
+                                    }}
+                                />
+                                {/* invisible to people; bots tend to fill it */}
+                                <input
+                                    value={trap}
+                                    onChange={(e) => setTrap(e.target.value)}
+                                    tabIndex={-1}
+                                    autoComplete="off"
+                                    aria-hidden="true"
+                                    name="website"
+                                    style={{ position: "absolute", left: -9999, width: 1, height: 1, opacity: 0 }}
+                                />
+                                <span style={{ ...label, fontFamily: SERIF, fontStyle: "italic", fontSize: 13, letterSpacing: 0 }}>
+                                    {msg.length}/60
+                                </span>
+                                <button
+                                    type="submit"
+                                    disabled={sending}
+                                    className="yl-ul"
+                                    style={{
+                                        fontSize: 13,
+                                        letterSpacing: "0.16em",
+                                        opacity: sending ? 0.4 : 1,
+                                        ...(narrow ? { border: `1px solid ${ink}`, padding: "12px 20px", backgroundImage: "none" } : {}),
+                                    }}
+                                >
+                                    添える
+                                </button>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", width: "100%", minHeight: 18 }}>
+                                <span style={{ ...label, letterSpacing: "0.06em" }} role="status">
+                                    {note}
+                                </span>
+                                <button type="button" onClick={() => setForm(false)} style={{ ...label, padding: "8px 0 8px 12px" }}>
+                                    閉じる
+                                </button>
+                            </div>
+                        </form>
+                    )}
+                </div>
+            </div>
+
+            {sheet &&
+                createPortal(
+                    <WriteSheet
+                        css={css}
+                        question={question}
+                        answers={answers}
+                        paper={paper}
+                        ink={ink}
+                        mute={mute}
+                        line={line}
+                        nick={nick}
+                        setNick={setNick}
+                        msg={msg}
+                        setMsg={setMsg}
+                        trap={trap}
+                        setTrap={setTrap}
+                        sending={sending}
+                        note={note}
+                        onSubmit={submit}
+                        onClose={() => setForm(false)}
+                        onLike={toggleLike}
+                    />,
+                    document.body
+                )}
+
+            {/* side button: all words */}
+            <button
+                onClick={() => setPanel("all")}
+                aria-label={`すべての言葉を見る（${count}）`}
+                style={{
+                    position: "absolute",
+                    right: narrow ? 8 : 24,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    writingMode: "vertical-rl",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    padding: narrow ? "16px 10px" : "10px 6px",
+                    zIndex: 3,
+                    opacity: narrow && form ? 0 : 1,
+                    pointerEvents: narrow && form ? "none" : "auto",
+                    transition: "opacity .6s ease",
+                    fontSize: 12,
+                    letterSpacing: "0.24em",
+                }}
+            >
+                <span className="yl-ul">すべての言葉</span>
+                <span style={{ display: "inline-block", width: 1, height: 28, background: ink }} />
+                <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 15, letterSpacing: 0, writingMode: "horizontal-tb" }}>
+                    {count}
+                </span>
+            </button>
+
+            {/* panels */}
+            <div
+                onClick={() => setPanel(null)}
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 9,
+                    background: paper,
+                    opacity: panel ? 0.72 : 0,
+                    pointerEvents: panel ? "auto" : "none",
+                    transition: "opacity .8s ease",
+                }}
+            />
+            <Panel open={panel === "all"} narrow={narrow} paper={paper} ink={ink} line={line} onClose={() => setPanel(null)}>
+                <AllWords answers={answers} question={question} ink={ink} mute={mute} line={line} onLike={toggleLike} />
+            </Panel>
+            <Panel open={panel === "archive"} narrow={narrow} paper={paper} ink={ink} line={line} onClose={() => setPanel(null)} wide>
+                <Archive items={archive} ink={ink} mute={mute} line={line} />
+            </Panel>
+        </div>
+    )
+}
+
+/* ───────────────────────── parts ───────────────────────── */
+
+/* the writing page on phones: one question, two fields, and the words
+   already left by others, each given room to breathe */
+function WriteSheet(p: any) {
+    const { css, question, answers, paper, ink, mute, line, nick, setNick, msg, setMsg, trap, setTrap, sending, note, onSubmit, onClose, onLike } = p
+    const list = (answers as Answer[]).slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+    const small: React.CSSProperties = { fontFamily: SANS, fontSize: 11, letterSpacing: "0.14em", color: mute }
+    const field: React.CSSProperties = {
+        width: "100%",
+        fontSize: 16, // 16px keeps iOS from zooming in
+        textAlign: "center",
+        padding: "14px 0",
+        background: "transparent",
+        border: 0,
+        outline: "none",
+        borderRadius: 0,
+    }
+    return (
+        <div
+            className="yl-q"
+            role="dialog"
+            aria-modal="true"
+            aria-label="ひとこと添える"
+            data-lenis-prevent
+            style={{
+                position: "fixed",
+                inset: 0,
+                height: "100dvh",
+                zIndex: 2147483000,
+                background: paper,
+                color: ink,
+                overflowY: "auto",
+                overscrollBehavior: "contain",
+                WebkitOverflowScrolling: "touch",
+                fontFamily: SANS,
+                animation: "ylFade .7s ease",
+            }}
+        >
+            <style>{css}</style>
+            <div style={{ maxWidth: 440, margin: "0 auto", padding: "26px 32px 120px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={small}>
+                        今月の問い
+                        <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, letterSpacing: "0.02em", marginLeft: 10, color: ink }}>
+                            {fmtMonth(question?.month) || fmtMonth(new Date().toISOString())}
+                        </span>
+                    </span>
+                    <button onClick={onClose} className="yl-ul" style={{ ...small, color: ink, padding: "10px 0 10px 16px" }}>
+                        閉じる
+                    </button>
+                </div>
+
+                <h2
+                    style={{
+                        margin: "16vh 0 0",
+                        fontFamily: MINCHO,
+                        fontWeight: 400,
+                        fontSize: 19,
+                        lineHeight: 2,
+                        letterSpacing: "0.1em",
+                        textAlign: "center",
+                        textWrap: "balance" as any,
+                    }}
+                >
+                    {question?.body}
+                </h2>
+
+                <form onSubmit={onSubmit} style={{ marginTop: 64, display: "flex", flexDirection: "column", gap: 18 }}>
+                    <input
+                        value={msg}
+                        onChange={(e) => setMsg(e.target.value.slice(0, 60))}
+                        placeholder="ひとこと（60字まで）"
+                        aria-label="ひとこと"
+                        enterKeyHint="next"
+                        style={{ ...field, fontFamily: MINCHO, borderBottom: `1px solid ${ink}` }}
+                    />
+                    <input
+                        value={nick}
+                        onChange={(e) => setNick(e.target.value.slice(0, 16))}
+                        placeholder="ニックネーム"
+                        aria-label="ニックネーム"
+                        enterKeyHint="send"
+                        style={{ ...field, borderBottom: `1px solid ${line}` }}
+                    />
+                    <input
+                        value={trap}
+                        onChange={(e) => setTrap(e.target.value)}
+                        tabIndex={-1}
+                        autoComplete="off"
+                        aria-hidden="true"
+                        name="website"
+                        style={{ position: "absolute", left: -9999, width: 1, height: 1, opacity: 0 }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+                        <span style={{ ...small, fontFamily: SERIF, fontStyle: "italic", fontSize: 13, letterSpacing: 0 }}>{msg.length}/60</span>
+                        <button
+                            type="submit"
+                            disabled={sending}
+                            style={{ fontSize: 13, letterSpacing: "0.2em", border: `1px solid ${ink}`, padding: "14px 30px", opacity: sending ? 0.4 : 1 }}
+                        >
+                            添える
+                        </button>
+                    </div>
+                    <div role="status" style={{ ...small, letterSpacing: "0.06em", textAlign: "center", minHeight: 18, marginTop: 6 }}>
+                        {note}
+                    </div>
+                </form>
+
+                <div style={{ marginTop: 120, textAlign: "center" }}>
+                    <span style={{ display: "inline-block", width: 1, height: 48, background: line }} />
+                    <div style={{ ...small, marginTop: 20 }}>
+                        届いた言葉
+                        <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, letterSpacing: 0, marginLeft: 10, color: ink }}>
+                            {list.filter((a) => !a.pending).length}
+                        </span>
+                    </div>
+                </div>
+
+                {list.length === 0 && (
+                    <p style={{ fontFamily: MINCHO, fontSize: 14, color: mute, lineHeight: 2.2, textAlign: "center", marginTop: 56 }}>
+                        まだ、どなたの言葉もありません。
+                        <br />
+                        最初のひとことを、お待ちしています。
+                    </p>
+                )}
+                <ul style={{ listStyle: "none", margin: "24px 0 0", padding: 0 }}>
+                    {list.map((a) => (
+                        <li key={a.id} style={{ textAlign: "center", padding: "52px 0" }}>
+                            <div style={{ fontFamily: MINCHO, fontSize: 16, lineHeight: 2, letterSpacing: "0.06em" }}>{a.body}</div>
+                            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14, marginTop: 10 }}>
+                                <span style={{ fontSize: 11, color: mute, letterSpacing: "0.08em" }}>— {a.nickname}</span>
+                                <LikeButton a={a} ink={ink} mute={mute} onLike={() => onLike(a.id)} />
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+            </div>
+        </div>
+    )
+}
+
+function Heart({ on, ink }: { on: boolean; ink: string }) {
+    return (
+        <svg width="11" height="10" viewBox="0 0 12 11" aria-hidden="true" style={{ display: "block" }}>
+            <path
+                d="M6 10.2 1.6 5.9A2.7 2.7 0 0 1 6 2.3a2.7 2.7 0 0 1 4.4 3.6Z"
+                fill={on ? ink : "none"}
+                stroke={ink}
+                strokeWidth="0.9"
+                strokeLinejoin="round"
+                style={{ transition: "fill .4s ease" }}
+            />
+        </svg>
+    )
+}
+
+function LikeButton({ a, ink, mute, onLike }: { a: Answer; ink: string; mute: string; onLike: () => void }) {
+    if (a.pending) return <span style={{ fontSize: 10, color: mute, letterSpacing: "0.08em" }}>確認中</span>
+    return (
+        <button
+            onClick={(e) => {
+                e.stopPropagation()
+                onLike()
+            }}
+            aria-pressed={a.liked}
+            aria-label={`いいね ${a.likes}`}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 2px" }}
+        >
+            <Heart on={a.liked} ink={ink} />
+            <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, lineHeight: 1, color: a.liked ? ink : mute, minWidth: 10 }}>
+                {a.likes}
+            </span>
+        </button>
+    )
+}
+
+function Word({ a, ink, mute, narrow, onLike }: { a: Answer; ink: string; mute: string; narrow: boolean; onLike: () => void }) {
+    return (
+        <div style={{ textAlign: "left" }}>
+            <div style={{ fontFamily: MINCHO, fontSize: narrow ? 13 : 15, lineHeight: 1.75, letterSpacing: "0.04em", color: ink }}>
+                {a.body}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
+                <span style={{ fontSize: 11, color: mute, letterSpacing: "0.08em" }}>— {a.nickname}</span>
+                <LikeButton a={a} ink={ink} mute={mute} onLike={onLike} />
+            </div>
+        </div>
+    )
+}
+
+function Panel({ open, narrow, wide = false, paper, ink, line, onClose, children }: any) {
+    return (
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-hidden={!open}
+            data-lenis-prevent
+            className="yl-scroll"
+            style={{
+                position: "absolute",
+                top: 0,
+                right: 0,
+                bottom: 0,
+                width: narrow ? "100%" : wide ? "min(640px, 56%)" : "min(460px, 40%)",
+                background: paper,
+                borderLeft: narrow ? "none" : `1px solid ${line}`,
+                zIndex: 10,
+                transform: open ? "translateX(0)" : "translateX(100%)",
+                visibility: open ? "visible" : "hidden",
+                transition: open
+                    ? "transform .8s cubic-bezier(.2,.7,.2,1), visibility 0s"
+                    : "transform .6s cubic-bezier(.6,0,.8,.4), visibility 0s .6s",
+                overflowY: "auto",
+                overscrollBehavior: "contain",
+                padding: narrow ? "72px 24px 48px" : "96px 48px 64px",
+            }}
+        >
+            <button
+                onClick={onClose}
+                style={{
+                    position: "absolute",
+                    top: narrow ? 22 : 38,
+                    right: narrow ? 20 : 40,
+                    fontSize: 11,
+                    letterSpacing: "0.14em",
+                    color: ink,
+                }}
+                className="yl-ul"
+            >
+                閉じる
+            </button>
+            {open && children}
+        </div>
+    )
+}
+
+function AllWords({ answers, question, ink, mute, line, onLike }) {
+    const [order, setOrder] = useState<"likes" | "new">("likes")
+    const list = useMemo(() => {
+        const l = answers.slice()
+        if (order === "likes") l.sort((a, b) => b.likes - a.likes || (b.createdAt || "").localeCompare(a.createdAt || ""))
+        else l.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+        return l
+    }, [answers, order])
+    const tab = (k: "likes" | "new", t: string) => (
+        <button
+            onClick={() => setOrder(k)}
+            style={{ fontSize: 11, letterSpacing: "0.14em", color: order === k ? ink : mute, borderBottom: `1px solid ${order === k ? ink : "transparent"}`, paddingBottom: 3 }}
+        >
+            {t}
+        </button>
+    )
+    return (
+        <div style={{ animation: "ylFade .8s ease" }}>
+            <div style={{ fontSize: 11, letterSpacing: "0.14em", color: mute }}>すべての言葉</div>
+            <div style={{ fontFamily: MINCHO, fontSize: 20, lineHeight: 1.7, letterSpacing: "0.06em", margin: "14px 0 28px" }}>
+                {question?.body}
+            </div>
+            <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
+                {tab("likes", "いいね順")}
+                {tab("new", "新しい順")}
+            </div>
+            {list.length === 0 && (
+                <p style={{ fontFamily: MINCHO, fontSize: 14, color: mute, lineHeight: 2, marginTop: 32 }}>
+                    まだ、どなたの言葉もありません。
+                    <br />
+                    最初のひとことを、お待ちしています。
+                </p>
+            )}
+            <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {list.map((a, i) => (
+                    <li
+                        key={a.id}
+                        style={{ display: "grid", gridTemplateColumns: "28px 1fr auto", gap: 12, alignItems: "baseline", padding: "18px 0", borderBottom: `1px solid ${line}` }}
+                    >
+                        <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 13, color: mute }}>
+                            {order === "likes" ? String(i + 1).padStart(2, "0") : ""}
+                        </span>
+                        <div>
+                            <div style={{ fontFamily: MINCHO, fontSize: 15, lineHeight: 1.8, letterSpacing: "0.04em" }}>{a.body}</div>
+                            <div style={{ fontSize: 11, color: mute, letterSpacing: "0.08em", marginTop: 2 }}>— {a.nickname}</div>
+                        </div>
+                        <LikeButton a={a} ink={ink} mute={mute} onLike={() => onLike(a.id)} />
+                    </li>
+                ))}
+            </ol>
+        </div>
+    )
+}
+
+function Archive({ items, ink, mute, line }: { items: ArchiveItem[] | null; ink: string; mute: string; line: string }) {
+    if (!items) return <div style={{ fontSize: 11, letterSpacing: "0.14em", color: mute }}>…</div>
+    return (
+        <div style={{ animation: "ylFade .8s ease" }}>
+            <div style={{ fontSize: 11, letterSpacing: "0.14em", color: mute }}>これまでの問い</div>
+            <div style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 28, margin: "10px 0 36px", color: ink }}>Archive</div>
+            {items.length === 0 && (
+                <p style={{ fontFamily: MINCHO, fontSize: 14, color: mute, lineHeight: 2 }}>
+                    最初のひと月が、いま始まったところです。
+                    <br />
+                    月がかわると、ここに言葉が積もっていきます。
+                </p>
+            )}
+            {items.map((it) => (
+                <section key={it.month} style={{ padding: "28px 0 32px", borderTop: `1px solid ${line}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 18 }}>{fmtMonth(it.month)}</span>
+                        <span style={{ fontSize: 11, color: mute, letterSpacing: "0.08em" }}>{it.total} の言葉</span>
+                    </div>
+                    <div style={{ fontFamily: MINCHO, fontSize: 19, lineHeight: 1.7, letterSpacing: "0.06em", margin: "12px 0 20px" }}>{it.body}</div>
+                    <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                        {it.top.map((t, i) => (
+                            <li key={i} style={{ display: "grid", gridTemplateColumns: "28px 1fr auto", gap: 12, alignItems: "baseline", padding: "10px 0" }}>
+                                <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 13, color: mute }}>{["i.", "ii.", "iii.", "iv.", "v."][i] || `${i + 1}.`}</span>
+                                <div>
+                                    <span style={{ fontFamily: MINCHO, fontSize: 15, lineHeight: 1.8 }}>{t.body}</span>
+                                    <span style={{ fontSize: 11, color: mute, marginLeft: 10 }}>— {t.nickname}</span>
+                                </div>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                    <Heart on ink={ink} />
+                                    <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14 }}>{t.likes}</span>
+                                </span>
+                            </li>
+                        ))}
+                    </ol>
+                </section>
+            ))}
+        </div>
+    )
+}
+
+YohakuQuestion.defaultProps = {
+    supabaseUrl: "",
+    supabaseKey: "",
+    fallbackQuestion: "あなたが最近美しいと感じたものや瞬間は？",
+    paper: "#F7F7F5",
+    ink: "#111111",
+    mute: "#8C8B87",
+    line: "rgba(17,17,17,0.12)",
+}
+
+addPropertyControls(YohakuQuestion, {
+    supabaseUrl: { type: ControlType.String, title: "Supabase URL", placeholder: "https://xxxx.supabase.co" },
+    supabaseKey: { type: ControlType.String, title: "Public Key", placeholder: "sb_publishable_… / anon key" },
+    fallbackQuestion: {
+        type: ControlType.String,
+        title: "Question",
+        displayTextArea: true,
+        description: "Supabase 未設定のとき（プレビュー）に表示する問い。設定後は Supabase の yl_questions が優先されます。",
+    },
+    paper: { type: ControlType.Color, title: "Paper" },
+    ink: { type: ControlType.Color, title: "Ink" },
+    mute: { type: ControlType.Color, title: "Mute" },
+    line: { type: ControlType.Color, title: "Line" },
+})
