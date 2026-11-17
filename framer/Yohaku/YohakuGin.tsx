@@ -1,0 +1,420 @@
+// Yohaku no Niwa GIN — the bottle, still, in front of its own name.
+// The name is set in Instrument Serif: roman for the garden, italic for the spirit.
+// The words from the back label surface in the whitespace when the section comes into view.
+import * as React from "react"
+import { addPropertyControls, ControlType, RenderTarget } from "framer"
+
+const FONT_HREF =
+    "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Shippori+Mincho:wght@400&family=Zen+Kaku+Gothic+New:wght@400&display=swap"
+
+const DEFAULT_BOTTLE = "https://framerusercontent.com/images/M1VCCaOkZ1HHTGdf0FgExgF4Zdk.webp"
+const DEFAULT_SILHOUETTE = "https://framerusercontent.com/images/8J6Lt8SjxBc98UHnXOC8DqZHA.png"
+
+const DEFAULT_TEXT = `就寝前の静かなひと時、
+深い森の中で深呼吸をするようにヒノキが香る。
+白檀のお香のような燻煙は森の霧のような余韻を残す。
+廃材になるはずだったヒノキは今ここに意味をもたらし、
+あなたの思考に、暮らしに余白を作る。
+余白の美の概念をここに。`
+
+function ensureFonts() {
+    if (typeof document === "undefined") return
+    if (document.querySelector("link[data-yohaku-gin-type]")) return
+    const l = document.createElement("link")
+    l.rel = "stylesheet"
+    l.href = FONT_HREF
+    l.setAttribute("data-yohaku-gin-type", "")
+    document.head.appendChild(l)
+}
+
+type Props = {
+    bottle?: { src: string; alt?: string } | string
+    silhouette?: { src: string } | string
+    title: string
+    accent: string
+    description: string
+    bottomLeft: string
+    bottomRight: string
+    releaseDate: string
+    releaseLabel: string
+    releaseColor: string
+    paper: string
+    ink: string
+    mute: string
+    style?: React.CSSProperties
+}
+
+const SERIF = `"Instrument Serif", "Times New Roman", serif`
+// tracking: the roman is drawn tight, as display type should be; the italic capitals breathe a little
+const TITLE_TRACK = -0.02
+const ACCENT_TRACK = 0.015
+// word space before the italic, slightly narrower than a full space (the italic leans into it)
+const GAP = 0.2
+
+const srcOf = (v: any) => (typeof v === "string" ? v : v?.src || "")
+
+export default function YohakuGin(props: Props) {
+    const { title, accent, description, bottomLeft, bottomRight, releaseDate, releaseLabel, releaseColor, paper, ink, mute } = props
+    const bottle = srcOf(props.bottle) || DEFAULT_BOTTLE
+    const silhouette = srcOf(props.silhouette) || DEFAULT_SILHOUETTE
+    const isCanvas = RenderTarget.current() === RenderTarget.canvas
+
+    const hostRef = React.useRef<HTMLElement>(null)
+    const [w, setW] = React.useState(1200)
+    const [h, setH] = React.useState(860)
+    const [seen, setSeen] = React.useState(false)
+    // width of the name at 100px, measured once the face has loaded (fallback: a close estimate)
+    const [nameW, setNameW] = React.useState(0)
+    const lines = React.useMemo(
+        () => description.split("\n").map((s) => s.trim()).filter(Boolean),
+        [description]
+    )
+
+    React.useEffect(() => {
+        if (typeof document === "undefined") return
+        ensureFonts()
+        let alive = true
+        const measure = () => {
+            const c = document.createElement("canvas").getContext("2d")
+            if (!c) return
+            c.font = `400 100px ${SERIF}`
+            const a = c.measureText(title).width + title.length * -2
+            c.font = `italic 400 100px ${SERIF}`
+            const b = c.measureText(accent).width + accent.length * ACCENT_TRACK * 100
+            if (alive) setNameW(a + (accent ? GAP * 100 + b : 0))
+        }
+        // the stylesheet arrives asynchronously: measure now, and again whenever faces finish loading
+        const load = () =>
+            Promise.all([
+                document.fonts.load(`400 100px "Instrument Serif"`),
+                document.fonts.load(`italic 400 100px "Instrument Serif"`),
+            ]).then(measure, measure)
+        load()
+        document.fonts.addEventListener?.("loadingdone", load)
+        return () => {
+            alive = false
+            document.fonts.removeEventListener?.("loadingdone", load)
+        }
+    }, [title, accent])
+
+    React.useEffect(() => {
+        ensureFonts()
+        const el = hostRef.current
+        if (!el) return
+        const measure = () => {
+            const r = el.getBoundingClientRect()
+            setW(r.width)
+            setH(r.height)
+        }
+        measure()
+        const ro = new ResizeObserver(measure)
+        ro.observe(el)
+        const io = new IntersectionObserver(
+            (es) => es.forEach((e) => e.isIntersecting && setSeen(true)),
+            { threshold: 0.45 }
+        )
+        io.observe(el)
+        return () => {
+            ro.disconnect()
+            io.disconnect()
+        }
+    }, [])
+
+    const show = seen || isCanvas
+    const narrow = w < 720
+    const pad = narrow ? 20 : 40
+    const ease = "cubic-bezier(.22,.61,.36,1)"
+
+    // bottle size: by height, leaving air above and below
+    const bottleH = narrow ? Math.min(h * 0.44, w * 1.1) : h * 0.78
+    const bottleW = bottleH * (690 / 1440)
+    const bottleTop = narrow ? h * 0.07 : (h - bottleH) / 2 + h * 0.01
+    // the name crosses the shoulders, where the glass is clear, so it reads through the bottle
+    // (on phones the name moves below the bottle so it stays legible)
+    const titleY = narrow ? bottleTop + bottleH + h * 0.055 : bottleTop + bottleH * 0.315
+    // the name is fitted to a measure: wide and quiet on desktop, edge to edge on phones
+    const measureW = narrow ? w - pad * 2 : w * 0.82
+    const fitted = (measureW / (nameW || 860)) * 100
+    const titleSize = narrow ? Math.min(fitted, h * 0.085) : Math.min(fitted, h * 0.26)
+    // the words sit to the right, just under the name
+    const wordsLeft = w / 2 + bottleW / 2 + Math.max(40, (w / 2 - bottleW / 2) * 0.12)
+
+    // the release date lives in the empty left side, mirroring the words on the right
+    const leftRoom = w / 2 - bottleW / 2 - pad
+    // (on phones there is no room beside the bottle, so it sits centred under the words)
+    const releaseSize = narrow ? Math.min(w * 0.11, h * 0.058) : Math.min(leftRoom * 0.24, h * 0.15, 132)
+    const wordsEnd = titleY + titleSize * 0.9 + lines.length * 12.5 * 2.1
+    const releaseTop = narrow ? wordsEnd + h * 0.022 : titleY + titleSize * 0.62
+    const roomForCorners = !narrow || h - (releaseTop + releaseSize * 1.5) > pad + 44
+
+    const corner: React.CSSProperties = {
+        position: "absolute",
+        fontFamily: `"Zen Kaku Gothic New", sans-serif`,
+        fontSize: 11,
+        letterSpacing: "0.14em",
+        color: mute,
+        whiteSpace: "nowrap",
+    }
+
+    return (
+        <section
+            ref={hostRef as any}
+            aria-label={`${title} ${accent}`}
+            style={{
+                ...props.style,
+                position: "relative",
+                width: "100%",
+                height: "100%",
+                overflow: "hidden",
+                background: paper,
+            }}
+        >
+            {/* the name: sharp around the bottle, blurred where the bottle stands in front of it */}
+            {[false, true].map((behind) => {
+                const maskPos = `${w / 2 - bottleW / 2}px ${bottleTop}px`
+                const maskSize = `${bottleW}px ${bottleH}px`
+                const mask: React.CSSProperties = behind
+                    ? {
+                          WebkitMaskImage: `url(${silhouette})`,
+                          maskImage: `url(${silhouette})`,
+                          WebkitMaskPosition: maskPos,
+                          maskPosition: maskPos,
+                          WebkitMaskSize: maskSize,
+                          maskSize: maskSize,
+                          WebkitMaskRepeat: "no-repeat",
+                          maskRepeat: "no-repeat",
+                      }
+                    : ({
+                          WebkitMaskImage: `linear-gradient(#000, #000), url(${silhouette})`,
+                          maskImage: `linear-gradient(#000, #000), url(${silhouette})`,
+                          WebkitMaskPosition: `0 0, ${maskPos}`,
+                          maskPosition: `0 0, ${maskPos}`,
+                          WebkitMaskSize: `100% 100%, ${maskSize}`,
+                          maskSize: `100% 100%, ${maskSize}`,
+                          WebkitMaskRepeat: "no-repeat",
+                          maskRepeat: "no-repeat",
+                          WebkitMaskComposite: "xor",
+                          maskComposite: "exclude",
+                      } as any)
+                return (
+                    <div
+                        key={behind ? "b" : "f"}
+                        aria-hidden={behind}
+                        style={{ position: "absolute", inset: 0, pointerEvents: "none", ...mask }}
+                    >
+                        <h2
+                            style={{
+                                position: "absolute",
+                                left: 0,
+                                right: 0,
+                                top: titleY,
+                                transform: "translateY(-50%)",
+                                margin: 0,
+                                textAlign: "center",
+                                fontFamily: SERIF,
+                                fontWeight: 400,
+                                fontSize: titleSize,
+                                lineHeight: 1,
+                                letterSpacing: `${TITLE_TRACK}em`,
+                                fontKerning: "normal",
+                                fontFeatureSettings: '"kern", "liga"',
+                                color: ink,
+                                whiteSpace: "nowrap",
+                                filter: behind ? `blur(${Math.max(4, titleSize * 0.07)}px)` : "none",
+                                opacity: show ? (behind ? 0.5 : 1) : 0,
+                                transition: `opacity 2.4s ${ease}`,
+                                userSelect: "none",
+                            }}
+                        >
+                            {title}
+                            {accent && (
+                                <i
+                                    style={{
+                                        fontStyle: "italic",
+                                        fontWeight: 400,
+                                        marginLeft: `${GAP}em`,
+                                        letterSpacing: `${ACCENT_TRACK}em`,
+                                    }}
+                                >
+                                    {accent}
+                                </i>
+                            )}
+                        </h2>
+                    </div>
+                )
+            })}
+
+            {/* soft contact shadow */}
+            <div
+                style={{
+                    position: "absolute",
+                    left: "50%",
+                    top: bottleTop + bottleH * 0.985,
+                    width: bottleW * 1.15,
+                    height: bottleW * 0.12,
+                    transform: "translate(-50%, -50%)",
+                    background:
+                        "radial-gradient(closest-side, rgba(17,17,17,0.16), rgba(17,17,17,0.05) 60%, rgba(17,17,17,0) 100%)",
+                    filter: "blur(2px)",
+                    opacity: show ? 1 : 0,
+                    transition: `opacity 1.8s ${ease} .2s`,
+                    pointerEvents: "none",
+                }}
+            />
+
+            {/* the bottle */}
+            <img
+                src={bottle}
+                alt={
+                    typeof props.bottle === "object" && props.bottle?.alt
+                        ? props.bottle.alt
+                        : "Yohaku no Niwa Forest Distilled Gin"
+                }
+                draggable={false}
+                style={{
+                    position: "absolute",
+                    left: "50%",
+                    top: bottleTop,
+                    height: bottleH,
+                    width: bottleW,
+                    transform: show ? "translate(-50%, 0)" : "translate(-50%, 10px)",
+                    opacity: show ? 1 : 0,
+                    transition: `opacity 1.8s ${ease} .2s, transform 2.2s ${ease} .2s`,
+                    userSelect: "none",
+                    pointerEvents: "none",
+                }}
+            />
+
+            {/* the words from the back label */}
+            <div
+                style={
+                    narrow
+                        ? {
+                              position: "absolute",
+                              left: 24,
+                              right: 24,
+                              top: titleY + titleSize * 0.9,
+                              textAlign: "center",
+                          }
+                        : {
+                              position: "absolute",
+                              left: wordsLeft,
+                              top: titleY + titleSize * 0.62,
+                          }
+                }
+            >
+                {lines.map((l, i) => (
+                    <p
+                        key={i}
+                        style={{
+                            margin: 0,
+                            fontFamily: `"Shippori Mincho", serif`,
+                            fontSize: narrow ? 12.5 : 13,
+                            lineHeight: narrow ? 2.1 : 2.3,
+                            letterSpacing: "0.06em",
+                            color: ink,
+                            whiteSpace: "nowrap",
+                            opacity: show ? 1 : 0,
+                            filter: show ? "blur(0px)" : "blur(6px)",
+                            transform: show ? "translate(0,0)" : "translateY(6px)",
+                            transition: `opacity 1.6s ${ease}, filter 1.6s ${ease}, transform 1.8s ${ease}`,
+                            transitionDelay: `${1.2 + i * 0.35}s`,
+                        }}
+                    >
+                        {l}
+                    </p>
+                ))}
+            </div>
+
+            {/* the release date: large, in a pale luminous blue, alone in the left whitespace */}
+            {releaseDate && (
+                <div
+                    style={{
+                        position: "absolute",
+                        left: narrow ? 0 : pad + leftRoom * 0.1,
+                        right: narrow ? 0 : "auto",
+                        textAlign: narrow ? "center" : "left",
+                        top: releaseTop,
+                        color: releaseColor,
+                        opacity: show ? 1 : 0,
+                        filter: show ? "blur(0px)" : "blur(8px)",
+                        transform: show ? "translate(0,0)" : "translateY(8px)",
+                        transition: `opacity 2s ${ease} .6s, filter 2s ${ease} .6s, transform 2.2s ${ease} .6s`,
+                        pointerEvents: "none",
+                        userSelect: "none",
+                    }}
+                >
+                    {releaseLabel && (
+                        <div
+                            style={{
+                                fontFamily: `"Zen Kaku Gothic New", sans-serif`,
+                                fontSize: narrow ? 10 : 11,
+                                letterSpacing: "0.32em",
+                                textTransform: "uppercase",
+                                marginBottom: narrow ? 4 : releaseSize * 0.12,
+                                paddingLeft: "0.32em",
+                            }}
+                        >
+                            {releaseLabel}
+                        </div>
+                    )}
+                    <div
+                        style={{
+                            fontFamily: SERIF,
+                            fontStyle: "italic",
+                            fontWeight: 400,
+                            fontSize: releaseSize,
+                            lineHeight: 0.92,
+                            letterSpacing: "-0.01em",
+                            whiteSpace: "nowrap",
+                            textShadow: `0 0 ${Math.round(releaseSize * 0.35)}px ${releaseColor}55`,
+                        }}
+                    >
+                        {releaseDate}
+                    </div>
+                </div>
+            )}
+
+            {bottomLeft && roomForCorners && (
+                <div style={{ ...corner, left: pad, bottom: narrow ? pad + 20 : pad }}>{bottomLeft}</div>
+            )}
+            {bottomRight && roomForCorners && (
+                <div style={narrow ? { ...corner, left: pad, bottom: pad } : { ...corner, right: pad, bottom: pad }}>
+                    {bottomRight}
+                </div>
+            )}
+        </section>
+    )
+}
+
+YohakuGin.displayName = "Yohaku no Niwa GIN"
+
+YohakuGin.defaultProps = {
+    title: "Yohaku no Niwa",
+    accent: "GIN",
+    description: DEFAULT_TEXT,
+    bottomLeft: "Forest Distilled Gin — Hinoki Leaves, Nagano",
+    bottomRight: "500ml / 40% vol",
+    releaseDate: "Nov 28th",
+    releaseLabel: "Release",
+    releaseColor: "#2FD8F2",
+    paper: "#F7F7F5",
+    ink: "#111111",
+    mute: "#8C8B87",
+}
+
+addPropertyControls(YohakuGin, {
+    bottle: { type: ControlType.ResponsiveImage, title: "Bottle" },
+    silhouette: { type: ControlType.ResponsiveImage, title: "Bottle Shape" },
+    title: { type: ControlType.String, title: "Title" },
+    accent: { type: ControlType.String, title: "Accent" },
+    description: { type: ControlType.String, title: "Back Text", displayTextArea: true },
+    bottomLeft: { type: ControlType.String, title: "Bottom Left" },
+    bottomRight: { type: ControlType.String, title: "Bottom Right" },
+    releaseDate: { type: ControlType.String, title: "Release Date" },
+    releaseLabel: { type: ControlType.String, title: "Release Label" },
+    releaseColor: { type: ControlType.Color, title: "Release Color" },
+    paper: { type: ControlType.Color, title: "Paper" },
+    ink: { type: ControlType.Color, title: "Ink" },
+    mute: { type: ControlType.Color, title: "Mute" },
+})
