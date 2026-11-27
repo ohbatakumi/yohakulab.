@@ -4,6 +4,19 @@
 import * as React from "react"
 import { addPropertyControls, ControlType } from "framer"
 
+
+// Framer hands colours over as "rgb(r, g, b)", so alpha is applied here rather than by appending hex digits.
+function tint(c: string, hex: string) {
+    const a = parseInt(hex, 16) / 255
+    const m = String(c).match(/rgba?\(([^)]+)\)/)
+    if (m) {
+        const [r, g, b] = m[1].split(",").map((v) => parseFloat(v))
+        return `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`
+    }
+    if (/^#[0-9a-f]{6}$/i.test(c)) return c + hex
+    return c
+}
+
 const FONT_HREF =
     "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Shippori+Mincho:wght@400&family=Zen+Kaku+Gothic+New:wght@400&display=swap"
 
@@ -128,7 +141,7 @@ export default function YohakuThanks(props: Props) {
                 {body}
             </p>
 
-            <div style={{ ...fade(2.4), width: 1, height: phone ? 40 : 56, background: `${ink}55`, margin: phone ? "36px 0" : "44px 0" }} />
+            <div style={{ ...fade(2.4), width: 1, height: phone ? 40 : 56, background: tint(ink, "55"), margin: phone ? "36px 0" : "44px 0" }} />
 
             <p style={{ ...fade(2.8), fontFamily: mincho, fontSize: phone ? 14 : 15, lineHeight: 2, letterSpacing: "0.1em", margin: 0, minHeight: "2em", whiteSpace: "pre-line" }}>
                 {hourLine}
@@ -139,7 +152,7 @@ export default function YohakuThanks(props: Props) {
                 {email ? (
                     <div style={{ ...small, lineHeight: 1.9 }}>
                         お届けについてのご相談は{" "}
-                        <a href={`mailto:${email}`} style={{ fontFamily: serif, fontSize: 15, color: ink, textDecoration: "none", borderBottom: `1px solid ${ink}44`, letterSpacing: "0.01em" }}>
+                        <a href={`mailto:${email}`} style={{ fontFamily: serif, fontSize: 15, color: ink, textDecoration: "none", borderBottom: `1px solid ${tint(ink, "44")}`, letterSpacing: "0.01em" }}>
                             {email}
                         </a>
                     </div>

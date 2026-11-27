@@ -4,6 +4,19 @@
 import * as React from "react"
 import { addPropertyControls, ControlType } from "framer"
 
+
+// Framer hands colours over as "rgb(r, g, b)", so alpha is applied here rather than by appending hex digits.
+function tint(c: string, hex: string) {
+    const a = parseInt(hex, 16) / 255
+    const m = String(c).match(/rgba?\(([^)]+)\)/)
+    if (m) {
+        const [r, g, b] = m[1].split(",").map((v) => parseFloat(v))
+        return `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`
+    }
+    if (/^#[0-9a-f]{6}$/i.test(c)) return c + hex
+    return c
+}
+
 const FONT_HREF =
     "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Shippori+Mincho:wght@400&family=Zen+Kaku+Gothic+New:wght@400&display=swap"
 
@@ -91,7 +104,7 @@ export default function YohakuLegal(props: Props) {
                         gridTemplateColumns: phone ? "1fr" : "220px 1fr",
                         gap: phone ? 6 : 32,
                         padding: phone ? "18px 0" : "22px 0",
-                        borderTop: `1px solid ${mute}40`,
+                        borderTop: `1px solid ${tint(mute, "40")}`,
                     }}
                 >
                     <dt style={{ fontFamily: gothic, fontSize: 12, color: mute, letterSpacing: "0.1em", lineHeight: 1.9 }}>{label}</dt>
@@ -141,7 +154,7 @@ export default function YohakuLegal(props: Props) {
                     ]
                         .filter(([l]) => l)
                         .map(([l, f], i) => (
-                            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "18px 0", borderTop: `1px solid ${mute}40`, fontFamily: gothic, fontSize: 13.5 }}>
+                            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "18px 0", borderTop: `1px solid ${tint(mute, "40")}`, fontFamily: gothic, fontSize: 13.5 }}>
                                 <dt>{l}</dt>
                                 <dd style={{ margin: 0 }}>¥{f}</dd>
                             </div>

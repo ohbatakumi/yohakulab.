@@ -9,6 +9,19 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import { addPropertyControls, ControlType, RenderTarget } from "framer"
 
+
+// Framer hands colours over as "rgb(r, g, b)", so alpha is applied here rather than by appending hex digits.
+function tint(c: string, hex: string) {
+    const a = parseInt(hex, 16) / 255
+    const m = String(c).match(/rgba?\(([^)]+)\)/)
+    if (m) {
+        const [r, g, b] = m[1].split(",").map((v) => parseFloat(v))
+        return `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`
+    }
+    if (/^#[0-9a-f]{6}$/i.test(c)) return c + hex
+    return c
+}
+
 const FONT_HREF =
     "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Shippori+Mincho:wght@400&family=Zen+Kaku+Gothic+New:wght@400&display=swap"
 
@@ -47,6 +60,7 @@ type Props = {
     regionDUrl: string
     contactEmail: string
     contactLabel: string
+    contactHint: string
     legalHref: string
     paper: string
     ink: string
@@ -80,7 +94,7 @@ export default function YohakuPurchase(props: Props) {
         name, accent, spec, price, releaseAt, releaseText, soldOut, previewOpen,
         regionALabel, regionAFee, regionAUrl, regionBLabel, regionBFee, regionBUrl,
         regionCLabel, regionCFee, regionCUrl, regionDLabel, regionDFee, regionDUrl,
-        contactEmail, contactLabel, legalHref, paper, ink, mute,
+        contactEmail, contactLabel, contactHint, legalHref, paper, ink, mute,
     } = props
     const isCanvas = RenderTarget.current() === RenderTarget.canvas
     const hostRef = React.useRef<HTMLDivElement>(null)
@@ -189,28 +203,39 @@ export default function YohakuPurchase(props: Props) {
             </button>
 
             {contactEmail && contactLabel ? (
-                <button
-                    type="button"
-                    disabled={isCanvas}
-                    onClick={() => setOpen("contact")}
-                    style={{
-                        marginTop: 18,
-                        background: "none",
-                        border: "none",
-                        padding: "4px 0",
-                        color: ink,
-                        fontFamily: gothic,
-                        fontSize: 12,
-                        letterSpacing: "0.1em",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: 10,
-                    }}
-                >
-                    <span style={{ fontFamily: serif, fontStyle: "italic", fontSize: 15, letterSpacing: "0.02em", color: mute }}>or,</span>
-                    <span style={{ borderBottom: `1px solid ${ink}55`, paddingBottom: 2 }}>{contactLabel}</span>
-                </button>
+                <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, width: phone ? 220 : 260, marginTop: 18, color: mute }}>
+                        <span style={{ flex: 1, height: 1, background: tint(mute, "55") }} />
+                        <span style={{ fontFamily: serif, fontStyle: "italic", fontSize: 15 }}>or</span>
+                        <span style={{ flex: 1, height: 1, background: tint(mute, "55") }} />
+                    </div>
+                    <button
+                        type="button"
+                        disabled={isCanvas}
+                        onClick={() => setOpen("contact")}
+                        style={{
+                            marginTop: 18,
+                            minWidth: phone ? 220 : 260,
+                            padding: "13px 28px",
+                            background: "transparent",
+                            color: ink,
+                            border: `1px solid ${tint(mute, "88")}`,
+                            borderRadius: 0,
+                            fontFamily: mincho,
+                            fontSize: 14,
+                            letterSpacing: "0.24em",
+                            cursor: "pointer",
+                            transition: "border-color .4s ease",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.borderColor = ink)}
+                        onMouseLeave={(e) => (e.currentTarget.style.borderColor = tint(mute, "88"))}
+                    >
+                        {contactLabel}
+                    </button>
+                    {contactHint ? (
+                        <div style={{ fontFamily: gothic, fontSize: 11, color: mute, letterSpacing: "0.1em", marginTop: 10, textAlign: "center", lineHeight: 1.8 }}>{contactHint}</div>
+                    ) : null}
+                </>
             ) : null}
 
             <div style={{ fontFamily: gothic, fontSize: 13, color: ink, marginTop: 32, letterSpacing: "0.06em", textAlign: "center" }}>
@@ -218,7 +243,7 @@ export default function YohakuPurchase(props: Props) {
             </div>
             <a
                 href={legalHref}
-                style={{ fontFamily: gothic, fontSize: 11, color: mute, marginTop: 12, letterSpacing: "0.1em", textDecoration: "none", borderBottom: `1px solid ${mute}55`, paddingBottom: 2 }}
+                style={{ fontFamily: gothic, fontSize: 11, color: mute, marginTop: 12, letterSpacing: "0.1em", textDecoration: "none", borderBottom: `1px solid ${tint(mute, "55")}`, paddingBottom: 2 }}
             >
                 特定商取引法に基づく表記・お届けについて
             </a>
@@ -419,7 +444,7 @@ function Sheet(p: SheetProps) {
                                             alignItems: "center",
                                             gap: 12,
                                             padding: "14px 0",
-                                            borderBottom: `1px solid ${mute}44`,
+                                            borderBottom: `1px solid ${tint(mute, "44")}`,
                                             cursor: "pointer",
                                             fontFamily: gothic,
                                             fontSize: 13,
@@ -491,7 +516,7 @@ function Sheet(p: SheetProps) {
                                 padding: "17px 0",
                                 background: ready ? ink : "transparent",
                                 color: ready ? paper : mute,
-                                border: `1px solid ${ready ? ink : mute + "88"}`,
+                                border: `1px solid ${ready ? ink : tint(mute, "88")}`,
                                 borderRadius: 0,
                                 fontFamily: mincho,
                                 fontSize: 15,
@@ -512,8 +537,8 @@ function Sheet(p: SheetProps) {
                                     onClick={() => setMode("contact")}
                                     style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: ink, fontFamily: gothic, fontSize: 12, letterSpacing: "0.08em" }}
                                 >
-                                    <span style={{ fontFamily: serif, fontStyle: "italic", fontSize: 15, color: mute, marginRight: 8 }}>or,</span>
-                                    <span style={{ borderBottom: `1px solid ${ink}55`, paddingBottom: 2 }}>メールで相談する</span>
+                                    <span style={{ color: mute }}>ギフトや本数のご相談は　</span>
+                                    <span style={{ borderBottom: `1px solid ${tint(ink, "55")}`, paddingBottom: 2 }}>メールでも承ります</span>
                                 </button>
                             </div>
                         ) : null}
@@ -690,7 +715,8 @@ YohakuPurchase.defaultProps = {
     regionDFee: "",
     regionDUrl: "",
     contactEmail: "yohaku.ohba@gmail.com",
-    contactLabel: "メールでのご相談",
+    contactLabel: "メールで相談する",
+    contactHint: "ギフト・まとまった本数・そのほかのお問い合わせ",
     legalHref: "/legal",
     paper: "#F7F7F5",
     ink: "#111111",
@@ -719,7 +745,8 @@ addPropertyControls(YohakuPurchase, {
     regionDFee: { type: ControlType.String, title: "Region D fee", placeholder: "空欄 = メールで相談" },
     regionDUrl: { type: ControlType.String, title: "Region D Square link" },
     contactEmail: { type: ControlType.String, title: "Contact email" },
-    contactLabel: { type: ControlType.String, title: "Contact link text", placeholder: "空欄 = 表示しない" },
+    contactLabel: { type: ControlType.String, title: "Contact button", placeholder: "空欄 = 表示しない" },
+    contactHint: { type: ControlType.String, title: "Contact hint" },
     legalHref: { type: ControlType.String, title: "Legal page" },
     paper: { type: ControlType.Color, title: "Paper" },
     ink: { type: ControlType.Color, title: "Ink" },
