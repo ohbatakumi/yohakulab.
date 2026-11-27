@@ -595,7 +595,7 @@ function Letter(p: {
             <div style={{ fontFamily: serif, fontStyle: "italic", fontSize: 15, color: mute, letterSpacing: "0.04em", marginTop: onBack ? 12 : 0 }}>(Write to us)</div>
             <div style={{ fontFamily: mincho, fontSize: 22, marginTop: 10, letterSpacing: "0.08em" }}>メールでのご相談</div>
             <p style={{ fontFamily: gothic, fontSize: 13, lineHeight: 1.95, marginTop: 20, marginBottom: 0, wordBreak: "keep-all", overflowWrap: "anywhere" }}>
-                海外へのお届け、贈りもの、まとまった本数のご注文など。
+                贈りもの、まとまった本数のご注文、お届けのご相談など。
                 <br />
                 ご希望をそのまま、お聞かせください。
             </p>
@@ -606,7 +606,7 @@ function Letter(p: {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 88px", gap: 20 }}>
                 <div>
                     <label style={small} htmlFor="yl-place">お届け先（国・地域）</label>
-                    <input id="yl-place" value={place} placeholder={regionLabel || "例 東京都／France"} onChange={(e) => setPlace(e.target.value)} style={field} />
+                    <input id="yl-place" value={place} placeholder={regionLabel || "例 東京都"} onChange={(e) => setPlace(e.target.value)} style={field} />
                 </div>
                 <div>
                     <label style={small} htmlFor="yl-count">本数</label>
@@ -679,18 +679,18 @@ YohakuPurchase.defaultProps = {
     previewOpen: false,
     regionALabel: "本州・四国・九州",
     regionAFee: "1,100",
-    regionAUrl: "",
+    regionAUrl: "https://square.link/u/rVnclvyF",
     regionBLabel: "北海道・沖縄・離島",
     regionBFee: "1,800",
     regionBUrl: "",
-    regionCLabel: "海外 — Overseas",
+    regionCLabel: "",
     regionCFee: "",
     regionCUrl: "",
     regionDLabel: "",
     regionDFee: "",
     regionDUrl: "",
     contactEmail: "yohaku.ohba@gmail.com",
-    contactLabel: "メールでのご相談・海外へのお届け",
+    contactLabel: "メールでのご相談",
     legalHref: "/legal",
     paper: "#F7F7F5",
     ink: "#111111",
@@ -712,7 +712,7 @@ addPropertyControls(YohakuPurchase, {
     regionBLabel: { type: ControlType.String, title: "Region B" },
     regionBFee: { type: ControlType.String, title: "Region B fee" },
     regionBUrl: { type: ControlType.String, title: "Region B Square link" },
-    regionCLabel: { type: ControlType.String, title: "Region C" },
+    regionCLabel: { type: ControlType.String, title: "Region C", placeholder: "空欄 = 表示しない" },
     regionCFee: { type: ControlType.String, title: "Region C fee", placeholder: "空欄 = メールで相談" },
     regionCUrl: { type: ControlType.String, title: "Region C Square link" },
     regionDLabel: { type: ControlType.String, title: "Region D", placeholder: "空欄 = 表示しない" },
