@@ -682,7 +682,7 @@ YohakuPurchase.defaultProps = {
     regionAUrl: "https://square.link/u/rVnclvyF",
     regionBLabel: "北海道・沖縄・離島",
     regionBFee: "1,800",
-    regionBUrl: "",
+    regionBUrl: "https://square.link/u/za0hzUAT",
     regionCLabel: "",
     regionCFee: "",
     regionCUrl: "",
