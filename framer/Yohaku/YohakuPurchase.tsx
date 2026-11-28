@@ -62,6 +62,7 @@ type Props = {
     couponNote: string
     coupon2Code: string
     coupon2Url: string
+    ageMode: string
     regionACouponUrl: string
     regionBCouponUrl: string
     regionCCouponUrl: string
@@ -102,7 +103,7 @@ export default function YohakuPurchase(props: Props) {
         name, accent, spec, price, releaseAt, releaseText, soldOut, previewOpen,
         regionALabel, regionAFee, regionAUrl, regionBLabel, regionBFee, regionBUrl,
         regionCLabel, regionCFee, regionCUrl, regionDLabel, regionDFee, regionDUrl,
-        couponCode, couponNote, coupon2Code, coupon2Url, regionACouponUrl, regionBCouponUrl, regionCCouponUrl, regionDCouponUrl,
+        couponCode, couponNote, coupon2Code, coupon2Url, ageMode, regionACouponUrl, regionBCouponUrl, regionCCouponUrl, regionDCouponUrl,
         contactEmail, contactLabel, contactHint, legalHref, paper, ink, mute,
     } = props
     const isCanvas = RenderTarget.current() === RenderTarget.canvas
@@ -268,6 +269,7 @@ export default function YohakuPurchase(props: Props) {
                           couponNote={couponNote}
                           coupon2Code={coupon2Code}
                           coupon2Url={coupon2Url}
+                          ageCheckOnly={ageMode !== "birthdate"}
                           productName={[name, accent].filter(Boolean).join(" ")}
                           phone={phone}
                           regions={[
@@ -288,6 +290,17 @@ export default function YohakuPurchase(props: Props) {
     )
 }
 
+// "20歳以上です" — a single required tick, in the same square as the legal-notice tick.
+function AgeTick(p: { checked: boolean; onChange: (v: boolean) => void; ink: string }) {
+    return (
+        <label style={{ display: "flex", gap: 12, alignItems: "center", cursor: "pointer", fontFamily: gothic, fontSize: 14, letterSpacing: "0.06em", padding: "14px 0 6px" }}>
+            <span style={{ flex: "none", width: 13, height: 13, border: `1px solid ${p.ink}`, background: p.checked ? p.ink : "transparent", transition: "background .3s" }} />
+            <input type="checkbox" checked={p.checked} onChange={(e) => p.onChange(e.target.checked)} style={{ position: "absolute", opacity: 0, pointerEvents: "none" }} />
+            <span>20歳以上です</span>
+        </label>
+    )
+}
+
 type Region = { label: string; fee: string; url: string; couponUrl?: string }
 
 const normCode = (v: string) =>
@@ -305,6 +318,7 @@ type SheetProps = {
     couponNote: string
     coupon2Code: string
     coupon2Url: string
+    ageCheckOnly: boolean
     productName: string
     phone: boolean
     regions: Region[]
@@ -315,8 +329,9 @@ type SheetProps = {
 }
 
 function Sheet(p: SheetProps) {
-    const { onClose, startContact, email, price, couponCode, couponNote, coupon2Code, coupon2Url, productName, phone, regions, legalHref, paper, ink, mute } = p
+    const { onClose, startContact, email, price, couponCode, couponNote, coupon2Code, coupon2Url, ageCheckOnly, productName, phone, regions, legalHref, paper, ink, mute } = p
     const [mode, setMode] = React.useState<"buy" | "contact">(startContact ? "contact" : "buy")
+    const [over20, setOver20] = React.useState(false)
     const [y, setY] = React.useState("")
     const [m, setM] = React.useState("")
     const [d, setD] = React.useState("")
@@ -347,8 +362,8 @@ function Sheet(p: SheetProps) {
     const filled = y.length === 4 && m !== "" && d !== ""
     const valid = validDate(yn, mn, dn)
     const age = valid ? ageOn(yn, mn, dn, new Date()) : -1
-    const adult = valid && age >= 20
-    const under = valid && age < 20
+    const adult = ageCheckOnly ? over20 : valid && age >= 20
+    const under = !ageCheckOnly && valid && age < 20
     const chosen = region >= 0 ? regions[region] : undefined
     const byLetter = !!chosen && !chosen.fee && !!email
     const typed = normCode(coupon)
@@ -432,7 +447,9 @@ function Sheet(p: SheetProps) {
                         price={price}
                         regions={regions}
                         startKind={byLetter ? "ask" : "order"}
-                        birth={adult ? { y, m, d } : { y: "", m: "", d: "" }}
+                        ageCheckOnly={ageCheckOnly}
+                        over20={adult}
+                        birth={adult && !ageCheckOnly ? { y, m, d } : { y: "", m: "", d: "" }}
                         onBack={startContact ? null : () => setMode("buy")}
                         ink={ink}
                         mute={mute}
@@ -445,9 +462,16 @@ function Sheet(p: SheetProps) {
                         <p style={{ fontFamily: gothic, fontSize: 13, lineHeight: 1.9, marginTop: 20, marginBottom: 0 }}>
                             20歳未満の方には、酒類を販売いたしません。
                             <br />
-                            生年月日をご入力ください。
+                            {ageCheckOnly ? "年齢のご確認をお願いいたします。" : "生年月日をご入力ください。"}
                         </p>
 
+                        {ageCheckOnly ? (
+                            <div style={{ marginTop: 20, borderBottom: `1px solid ${tint(mute, "44")}` }}>
+                                <div style={small}>年齢の確認（必須）</div>
+                                <AgeTick checked={over20} onChange={setOver20} ink={ink} />
+                            </div>
+                        ) : (
+                        <>
                         <div style={{ ...small, marginTop: 28 }}>生年月日（必須）</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1.6fr auto 1fr auto 1fr auto", alignItems: "end", gap: 8, marginTop: 4 }}>
                             <input aria-label="年" inputMode="numeric" placeholder="1990" value={y} onChange={(e) => setY(digits(e.target.value, 4))} style={input} />
@@ -457,8 +481,10 @@ function Sheet(p: SheetProps) {
                             <input aria-label="日" inputMode="numeric" placeholder="1" value={d} onChange={(e) => setD(digits(e.target.value, 2))} style={input} />
                             <span style={small}>日</span>
                         </div>
+                        </>
+                        )}
                         <div style={{ fontFamily: gothic, fontSize: 13, marginTop: 14, letterSpacing: "0.04em" }}>{AGE_NOTICE}</div>
-                        {filled && !valid ? <div style={{ ...small, marginTop: 8 }}>日付をご確認ください。</div> : null}
+                        {!ageCheckOnly && filled && !valid ? <div style={{ ...small, marginTop: 8 }}>日付をご確認ください。</div> : null}
                         {under ? (
                             <div style={{ fontFamily: gothic, fontSize: 13, lineHeight: 1.9, marginTop: 16 }}>
                                 申し訳ございません。
@@ -628,6 +654,8 @@ function Letter(p: {
     regions: Region[]
     startKind: Kind
     birth: { y: string; m: string; d: string }
+    ageCheckOnly: boolean
+    over20: boolean
     onBack: null | (() => void)
     ink: string
     mute: string
@@ -638,6 +666,7 @@ function Letter(p: {
     const [kind, setKind] = React.useState<Kind>(startKind)
     const [name, setName] = React.useState("")
     const [kana, setKana] = React.useState("")
+    const [over20, setOver20] = React.useState(p.over20)
     const [y, setY] = React.useState(p.birth.y)
     const [m, setM] = React.useState(p.birth.m)
     const [d, setD] = React.useState(p.birth.d)
@@ -658,8 +687,8 @@ function Letter(p: {
     const yn = parseInt(y, 10), mn = parseInt(m, 10), dn = parseInt(d, 10)
     const birthValid = validDate(yn, mn, dn)
     const age = birthValid ? ageOn(yn, mn, dn, new Date()) : -1
-    const adult = birthValid && age >= 20
-    const under = birthValid && age < 20
+    const adult = p.ageCheckOnly ? over20 : birthValid && age >= 20
+    const under = !p.ageCheckOnly && birthValid && age < 20
 
     const unit = parseInt(String(price).replace(/[^0-9]/g, ""), 10) || 0
     const r = region >= 0 ? shipRegions[region] : undefined
@@ -670,7 +699,7 @@ function Letter(p: {
     const missing: string[] = []
     if (kind === "order") {
         if (!name.trim()) missing.push("お名前")
-        if (!adult) missing.push("生年月日")
+        if (!adult) missing.push(p.ageCheckOnly ? "年齢の確認" : "生年月日")
         if (digits(zip, 7).length !== 7) missing.push("郵便番号")
         if (!addr.trim()) missing.push("ご住所")
         if (digits(tel, 11).length < 10) missing.push("電話番号")
@@ -707,7 +736,7 @@ function Letter(p: {
             `お届け日のご希望：${when || "指定なし"}`,
             "",
             "■ 年齢確認",
-            `生年月日：${birthValid ? `${yn}年${mn}月${dn}日` : ""}（20歳以上です）`,
+            p.ageCheckOnly ? "20歳以上です（確認済み）" : `生年月日：${birthValid ? `${yn}年${mn}月${dn}日` : ""}（20歳以上です）`,
             "",
             "■ ご連絡事項",
             note,
@@ -824,6 +853,16 @@ function Letter(p: {
                     <label style={label("")} htmlFor="yl-kana">フリガナ</label>
                     <input id="yl-kana" value={kana} onChange={(e) => setKana(e.target.value)} style={field} />
 
+                    {p.ageCheckOnly ? (
+                        <div style={{ borderBottom: `1px solid ${ink}` }}>
+                            <span style={label("")}>
+                                年齢の確認
+                                <Req />
+                            </span>
+                            <AgeTick checked={over20} onChange={setOver20} ink={ink} />
+                        </div>
+                    ) : (
+                    <>
                     <span style={label("")}>
                         生年月日
                         <Req />
@@ -836,6 +875,8 @@ function Letter(p: {
                         <input aria-label="日" inputMode="numeric" placeholder="1" value={d} onChange={(e) => setD(digits(e.target.value, 2))} style={num} />
                         <span style={small}>日</span>
                     </div>
+                    </>
+                    )}
                     {under ? (
                         <div style={{ fontFamily: gothic, fontSize: 12, lineHeight: 1.9, marginTop: 10 }}>申し訳ございません。20歳未満の方にはお売りすることができません。</div>
                     ) : null}
@@ -1012,6 +1053,7 @@ YohakuPurchase.defaultProps = {
     couponNote: "クーポンが適用されます。\nお支払いの画面で、金額をご確認ください。",
     coupon2Code: "YOHAKU0909",
     coupon2Url: "https://square.link/u/cAoRtF2H",
+    ageMode: "check",
     regionACouponUrl: "https://square.link/u/rcdG5qug",
     regionBCouponUrl: "https://square.link/u/rjQQWhyz",
     regionCCouponUrl: "",
@@ -1049,6 +1091,7 @@ addPropertyControls(YohakuPurchase, {
     couponCode: { type: ControlType.String, title: "Coupon code", placeholder: "空欄 = 欄を表示しない" },
     couponNote: { type: ControlType.String, title: "Coupon message", displayTextArea: true },
     coupon2Code: { type: ControlType.String, title: "Coupon 2 code", placeholder: "空欄 = 使わない" },
+    ageMode: { type: ControlType.Enum, title: "Age check", options: ["check", "birthdate"], optionTitles: ["20歳以上のチェック", "生年月日の入力"] },
     coupon2Url: { type: ControlType.String, title: "Coupon 2 link (全地域)" },
     regionACouponUrl: { type: ControlType.String, title: "Region A coupon link" },
     regionBCouponUrl: { type: ControlType.String, title: "Region B coupon link" },
