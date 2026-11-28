@@ -60,6 +60,8 @@ type Props = {
     regionDUrl: string
     couponCode: string
     couponNote: string
+    coupon2Code: string
+    coupon2Url: string
     regionACouponUrl: string
     regionBCouponUrl: string
     regionCCouponUrl: string
@@ -100,7 +102,7 @@ export default function YohakuPurchase(props: Props) {
         name, accent, spec, price, releaseAt, releaseText, soldOut, previewOpen,
         regionALabel, regionAFee, regionAUrl, regionBLabel, regionBFee, regionBUrl,
         regionCLabel, regionCFee, regionCUrl, regionDLabel, regionDFee, regionDUrl,
-        couponCode, couponNote, regionACouponUrl, regionBCouponUrl, regionCCouponUrl, regionDCouponUrl,
+        couponCode, couponNote, coupon2Code, coupon2Url, regionACouponUrl, regionBCouponUrl, regionCCouponUrl, regionDCouponUrl,
         contactEmail, contactLabel, contactHint, legalHref, paper, ink, mute,
     } = props
     const isCanvas = RenderTarget.current() === RenderTarget.canvas
@@ -264,6 +266,8 @@ export default function YohakuPurchase(props: Props) {
                           price={price}
                           couponCode={couponCode}
                           couponNote={couponNote}
+                          coupon2Code={coupon2Code}
+                          coupon2Url={coupon2Url}
                           productName={[name, accent].filter(Boolean).join(" ")}
                           phone={phone}
                           regions={[
@@ -299,6 +303,8 @@ type SheetProps = {
     price: string
     couponCode: string
     couponNote: string
+    coupon2Code: string
+    coupon2Url: string
     productName: string
     phone: boolean
     regions: Region[]
@@ -309,7 +315,7 @@ type SheetProps = {
 }
 
 function Sheet(p: SheetProps) {
-    const { onClose, startContact, email, price, couponCode, couponNote, productName, phone, regions, legalHref, paper, ink, mute } = p
+    const { onClose, startContact, email, price, couponCode, couponNote, coupon2Code, coupon2Url, productName, phone, regions, legalHref, paper, ink, mute } = p
     const [mode, setMode] = React.useState<"buy" | "contact">(startContact ? "contact" : "buy")
     const [y, setY] = React.useState("")
     const [m, setM] = React.useState("")
@@ -346,9 +352,12 @@ function Sheet(p: SheetProps) {
     const chosen = region >= 0 ? regions[region] : undefined
     const byLetter = !!chosen && !chosen.fee && !!email
     const typed = normCode(coupon)
-    const couponOn = !!couponCode && !!typed && typed === normCode(couponCode)
+    // Code 1 has its own link per region; code 2 has one link for every region.
+    const coupon1On = !!couponCode && !!typed && typed === normCode(couponCode)
+    const coupon2On = !!coupon2Code && !!typed && typed === normCode(coupon2Code)
+    const couponOn = coupon1On || coupon2On
     const couponWrong = !!typed && !couponOn
-    const url = (couponOn ? chosen?.couponUrl : chosen?.url) || ""
+    const url = (coupon2On ? coupon2Url : coupon1On ? chosen?.couponUrl : chosen?.url) || ""
     const ready = adult && !!chosen && !couponWrong && (byLetter || (agreed && !!url))
 
     let goText = "お支払いへ"
@@ -498,7 +507,7 @@ function Sheet(p: SheetProps) {
                                 ))}
                             </div>
 
-                            {couponCode && !byLetter ? (
+                            {(couponCode || coupon2Code) && !byLetter ? (
                                 <div style={{ marginTop: 26 }}>
                                     <label htmlFor="yl-coupon" style={{ ...small, display: "block" }}>
                                         クーポンコード
@@ -520,7 +529,7 @@ function Sheet(p: SheetProps) {
                                     </div>
                                     {couponOn ? (
                                         <div style={{ fontFamily: gothic, fontSize: 12, lineHeight: 1.9, marginTop: 10, wordBreak: "keep-all", overflowWrap: "anywhere", whiteSpace: "pre-line" }}>{couponNote}</div>
-                                    ) : couponWrong && typed.length >= normCode(couponCode).length ? (
+                                    ) : couponWrong && typed.length >= Math.min(...[couponCode, coupon2Code].filter(Boolean).map((c) => normCode(c).length)) ? (
                                         <div style={{ ...small, marginTop: 10 }}>このコードは見つかりませんでした。空欄のままでもご購入いただけます。</div>
                                     ) : null}
                                 </div>
@@ -1001,6 +1010,8 @@ YohakuPurchase.defaultProps = {
     regionDUrl: "",
     couponCode: "YOHAKU2026",
     couponNote: "クーポンが適用されます。\nお支払いの画面で、金額をご確認ください。",
+    coupon2Code: "YOHAKU0909",
+    coupon2Url: "https://square.link/u/cAoRtF2H",
     regionACouponUrl: "https://square.link/u/rcdG5qug",
     regionBCouponUrl: "https://square.link/u/rjQQWhyz",
     regionCCouponUrl: "",
@@ -1037,6 +1048,8 @@ addPropertyControls(YohakuPurchase, {
     regionDUrl: { type: ControlType.String, title: "Region D Square link" },
     couponCode: { type: ControlType.String, title: "Coupon code", placeholder: "空欄 = 欄を表示しない" },
     couponNote: { type: ControlType.String, title: "Coupon message", displayTextArea: true },
+    coupon2Code: { type: ControlType.String, title: "Coupon 2 code", placeholder: "空欄 = 使わない" },
+    coupon2Url: { type: ControlType.String, title: "Coupon 2 link (全地域)" },
     regionACouponUrl: { type: ControlType.String, title: "Region A coupon link" },
     regionBCouponUrl: { type: ControlType.String, title: "Region B coupon link" },
     regionCCouponUrl: { type: ControlType.String, title: "Region C coupon link" },
