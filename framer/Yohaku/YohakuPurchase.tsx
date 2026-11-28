@@ -1001,7 +1001,7 @@ YohakuPurchase.defaultProps = {
     regionDUrl: "",
     couponCode: "YOHAKU2026",
     couponNote: "クーポンが適用されます。\nお支払いの画面で、金額をご確認ください。",
-    regionACouponUrl: "",
+    regionACouponUrl: "https://square.link/u/rcdG5qug",
     regionBCouponUrl: "",
     regionCCouponUrl: "",
     regionDCouponUrl: "",
