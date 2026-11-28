@@ -254,6 +254,7 @@ export default function YohakuPurchase(props: Props) {
                           onClose={() => setOpen(null)}
                           startContact={open === "contact"}
                           email={contactEmail}
+                          price={price}
                           productName={[name, accent].filter(Boolean).join(" ")}
                           phone={phone}
                           regions={[
@@ -280,6 +281,7 @@ type SheetProps = {
     onClose: () => void
     startContact: boolean
     email: string
+    price: string
     productName: string
     phone: boolean
     regions: Region[]
@@ -290,7 +292,7 @@ type SheetProps = {
 }
 
 function Sheet(p: SheetProps) {
-    const { onClose, startContact, email, productName, phone, regions, legalHref, paper, ink, mute } = p
+    const { onClose, startContact, email, price, productName, phone, regions, legalHref, paper, ink, mute } = p
     const [mode, setMode] = React.useState<"buy" | "contact">(startContact ? "contact" : "buy")
     const [y, setY] = React.useState("")
     const [m, setM] = React.useState("")
@@ -353,7 +355,7 @@ function Sheet(p: SheetProps) {
         <div
             role="dialog"
             aria-modal="true"
-            aria-label={mode === "buy" ? "ご購入の前に" : "メールでのご相談"}
+            aria-label={mode === "buy" ? "ご購入の前に" : "メールでのご注文・ご相談"}
             onClick={onClose}
             style={{
                 position: "fixed",
@@ -396,8 +398,10 @@ function Sheet(p: SheetProps) {
                     <Letter
                         email={email}
                         productName={productName}
-                        regionLabel={chosen && !chosen.fee ? chosen.label : ""}
-                        birth={adult ? `${yn}年${mn}月${dn}日` : ""}
+                        price={price}
+                        regions={regions}
+                        startKind={byLetter ? "ask" : "order"}
+                        birth={adult ? { y, m, d } : { y: "", m: "", d: "" }}
                         onBack={startContact ? null : () => setMode("buy")}
                         ink={ink}
                         mute={mute}
@@ -537,8 +541,8 @@ function Sheet(p: SheetProps) {
                                     onClick={() => setMode("contact")}
                                     style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: ink, fontFamily: gothic, fontSize: 12, letterSpacing: "0.08em" }}
                                 >
-                                    <span style={{ color: mute }}>ギフトや本数のご相談は　</span>
-                                    <span style={{ borderBottom: `1px solid ${tint(ink, "55")}`, paddingBottom: 2 }}>メールでも承ります</span>
+                                    <span style={{ color: mute }}>銀行振込でのご注文・ご相談は　</span>
+                                    <span style={{ borderBottom: `1px solid ${tint(ink, "55")}`, paddingBottom: 2 }}>メールで承ります</span>
                                 </button>
                             </div>
                         ) : null}
@@ -549,25 +553,128 @@ function Sheet(p: SheetProps) {
     )
 }
 
-// A short letter instead of a form: it opens the visitor's own mail app, already written.
-// No server, nothing stored on the site. The address stays visible to copy, in case no mail app opens.
+// A letter instead of a form: it opens the visitor's own mail app, already written to us.
+// Two kinds — an order paid by bank transfer (every field the shop needs, age check included,
+// with the total worked out), or a free question. Nothing is sent or stored by the site itself.
+type Kind = "order" | "ask"
+
+function yen(n: number) {
+    return "¥" + n.toLocaleString("ja-JP")
+}
+
 function Letter(p: {
     email: string
     productName: string
-    regionLabel: string
-    birth: string
+    price: string
+    regions: Region[]
+    startKind: Kind
+    birth: { y: string; m: string; d: string }
     onBack: null | (() => void)
     ink: string
     mute: string
     paper: string
 }) {
-    const { email, productName, regionLabel, birth, onBack, ink, mute, paper } = p
+    const { email, productName, price, regions, startKind, onBack, ink, mute, paper } = p
+    const shipRegions = regions.filter((r) => r.fee)
+    const [kind, setKind] = React.useState<Kind>(startKind)
     const [name, setName] = React.useState("")
-    const [place, setPlace] = React.useState("")
-    const [count, setCount] = React.useState("1")
+    const [kana, setKana] = React.useState("")
+    const [y, setY] = React.useState(p.birth.y)
+    const [m, setM] = React.useState(p.birth.m)
+    const [d, setD] = React.useState(p.birth.d)
+    const [zip, setZip] = React.useState("")
+    const [addr, setAddr] = React.useState("")
+    const [tel, setTel] = React.useState("")
+    const [region, setRegion] = React.useState(shipRegions.length === 1 ? 0 : -1)
+    const [count, setCount] = React.useState(1)
+    const [when, setWhen] = React.useState("")
     const [note, setNote] = React.useState("")
+    const [tried, setTried] = React.useState(false)
     const [copied, setCopied] = React.useState(false)
     const [sent, setSent] = React.useState(false)
+
+    const toHalf = (v: string) => v.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    const digits = (v: string, n: number) => toHalf(v).replace(/[^0-9]/g, "").slice(0, n)
+
+    const yn = parseInt(y, 10), mn = parseInt(m, 10), dn = parseInt(d, 10)
+    const birthValid = validDate(yn, mn, dn)
+    const age = birthValid ? ageOn(yn, mn, dn, new Date()) : -1
+    const adult = birthValid && age >= 20
+    const under = birthValid && age < 20
+
+    const unit = parseInt(String(price).replace(/[^0-9]/g, ""), 10) || 0
+    const r = region >= 0 ? shipRegions[region] : undefined
+    const fee = r ? parseInt(r.fee.replace(/[^0-9]/g, ""), 10) || 0 : 0
+    const subtotal = unit * count
+    const total = subtotal + fee
+
+    const missing: string[] = []
+    if (kind === "order") {
+        if (!name.trim()) missing.push("お名前")
+        if (!adult) missing.push("生年月日")
+        if (digits(zip, 7).length !== 7) missing.push("郵便番号")
+        if (!addr.trim()) missing.push("ご住所")
+        if (digits(tel, 11).length < 10) missing.push("電話番号")
+        if (!r) missing.push("お届けの地域")
+    } else {
+        if (!name.trim()) missing.push("お名前")
+    }
+    const ok = missing.length === 0
+
+    const zip7 = digits(zip, 7)
+    const zipText = zip7.length === 7 ? `${zip7.slice(0, 3)}-${zip7.slice(3)}` : zip
+    let subject = ""
+    let lines: string[] = []
+    if (kind === "order") {
+        subject = `【銀行振込でのご注文】${productName} ×${count}`
+        lines = [
+            "余白研究室 御中",
+            "",
+            "銀行振込で、下記のとおり注文します。",
+            "",
+            "■ ご注文",
+            `商品：${productName}`,
+            `本数：${count}本`,
+            unit ? `商品代金：${yen(subtotal)}（税込）` : "",
+            r ? `送料：${yen(fee)}（${r.label}）` : "",
+            unit && r ? `合計：${yen(total)}` : "",
+            "",
+            "■ お届け先",
+            `お名前：${name}`,
+            `フリガナ：${kana}`,
+            `〒${zipText}`,
+            `ご住所：${addr}`,
+            `電話番号：${tel}`,
+            `お届け日のご希望：${when || "指定なし"}`,
+            "",
+            "■ 年齢確認",
+            `生年月日：${birthValid ? `${yn}年${mn}月${dn}日` : ""}（20歳以上です）`,
+            "",
+            "■ ご連絡事項",
+            note,
+            "",
+        ].filter((l, i, a) => l !== "" || a[i - 1] !== "")
+    } else {
+        subject = `${productName} — ご相談`
+        lines = [
+            "余白研究室 御中",
+            "",
+            `お名前：${name}`,
+            tel ? `電話番号：${tel}` : "",
+            "",
+            note,
+            "",
+        ].filter((l, i, a) => l !== "" || a[i - 1] !== "")
+    }
+    const href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`
+
+    const copy = async () => {
+        try {
+            await navigator.clipboard.writeText(email)
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2400)
+        } catch (e) {}
+    }
 
     const field: React.CSSProperties = {
         width: "100%",
@@ -582,29 +689,35 @@ function Letter(p: {
         outline: "none",
         borderRadius: 0,
     }
-    const small: React.CSSProperties = { fontFamily: gothic, fontSize: 11, color: mute, letterSpacing: "0.12em", display: "block", marginTop: 24 }
-
-    const subject = `${productName} — ご相談`
-    const lines = [
-        "余白研究室 御中",
-        "",
-        `お名前：${name}`,
-        `お届け先（国・地域）：${place || regionLabel}`,
-        `本数：${count}`,
-        birth ? `生年月日：${birth}` : "生年月日：",
-        "",
-        note,
-        "",
-    ]
-    const href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`
-
-    const copy = async () => {
-        try {
-            await navigator.clipboard.writeText(email)
-            setCopied(true)
-            setTimeout(() => setCopied(false), 2400)
-        } catch (e) {}
-    }
+    const num: React.CSSProperties = { ...field, textAlign: "center", fontFamily: serif, fontSize: 20 }
+    const label = (t: string, req = false): React.CSSProperties => ({ fontFamily: gothic, fontSize: 11, color: mute, letterSpacing: "0.12em", display: "block", marginTop: 24 })
+    const Req = () => <span style={{ marginLeft: 6, fontSize: 10, letterSpacing: "0.08em" }}>必須</span>
+    const small: React.CSSProperties = { fontFamily: gothic, fontSize: 11, color: mute, letterSpacing: "0.1em", lineHeight: 1.9 }
+    const tab = (k: Kind, t: string) => (
+        <button
+            type="button"
+            onClick={() => {
+                setKind(k)
+                setTried(false)
+            }}
+            aria-pressed={kind === k}
+            style={{
+                flex: 1,
+                background: "none",
+                border: "none",
+                borderBottom: `1px solid ${kind === k ? ink : tint(mute, "44")}`,
+                padding: "0 0 10px",
+                color: kind === k ? ink : mute,
+                fontFamily: mincho,
+                fontSize: 14,
+                letterSpacing: "0.12em",
+                cursor: "pointer",
+                transition: "color .3s, border-color .3s",
+            }}
+        >
+            {t}
+        </button>
+    )
 
     return (
         <div>
@@ -618,77 +731,199 @@ function Letter(p: {
                 </button>
             ) : null}
             <div style={{ fontFamily: serif, fontStyle: "italic", fontSize: 15, color: mute, letterSpacing: "0.04em", marginTop: onBack ? 12 : 0 }}>(Write to us)</div>
-            <div style={{ fontFamily: mincho, fontSize: 22, marginTop: 10, letterSpacing: "0.08em" }}>メールでのご相談</div>
-            <p style={{ fontFamily: gothic, fontSize: 13, lineHeight: 1.95, marginTop: 20, marginBottom: 0, wordBreak: "keep-all", overflowWrap: "anywhere" }}>
-                贈りもの、まとまった本数のご注文、お届けのご相談など。
-                <br />
-                ご希望をそのまま、お聞かせください。
-            </p>
+            <div style={{ fontFamily: mincho, fontSize: 22, marginTop: 10, letterSpacing: "0.08em" }}>メールでのご注文・ご相談</div>
 
-            <label style={small} htmlFor="yl-name">お名前</label>
-            <input id="yl-name" value={name} onChange={(e) => setName(e.target.value)} style={field} autoComplete="name" />
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 88px", gap: 20 }}>
-                <div>
-                    <label style={small} htmlFor="yl-place">お届け先（国・地域）</label>
-                    <input id="yl-place" value={place} placeholder={regionLabel || "例 東京都"} onChange={(e) => setPlace(e.target.value)} style={field} />
-                </div>
-                <div>
-                    <label style={small} htmlFor="yl-count">本数</label>
-                    <input id="yl-count" inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value.replace(/[^0-9０-９]/g, "").slice(0, 3))} style={{ ...field, textAlign: "center", fontFamily: serif, fontSize: 20 }} />
-                </div>
+            <div style={{ display: "flex", gap: 20, marginTop: 28 }}>
+                {tab("order", "銀行振込でご注文")}
+                {tab("ask", "ご相談・お問い合わせ")}
             </div>
 
-            <label style={small} htmlFor="yl-note">ご用件</label>
+            <p style={{ fontFamily: gothic, fontSize: 13, lineHeight: 1.95, marginTop: 22, marginBottom: 0, wordBreak: "keep-all", overflowWrap: "anywhere" }}>
+                {kind === "order" ? (
+                    <>
+                        必要なところだけ、ご記入ください。
+                        <br />
+                        ご注文のメールが、書きあがった状態でひらきます。
+                    </>
+                ) : (
+                    <>
+                        ギフト、まとまった本数、そのほかのことも。
+                        <br />
+                        ご希望をそのまま、お聞かせください。
+                    </>
+                )}
+            </p>
+
+            <label style={label("")} htmlFor="yl-name">
+                お名前
+                <Req />
+            </label>
+            <input id="yl-name" value={name} onChange={(e) => setName(e.target.value)} style={field} autoComplete="name" />
+
+            {kind === "order" ? (
+                <>
+                    <label style={label("")} htmlFor="yl-kana">フリガナ</label>
+                    <input id="yl-kana" value={kana} onChange={(e) => setKana(e.target.value)} style={field} />
+
+                    <span style={label("")}>
+                        生年月日
+                        <Req />
+                    </span>
+                    <div style={{ display: "grid", gridTemplateColumns: "1.6fr auto 1fr auto 1fr auto", alignItems: "end", gap: 8 }}>
+                        <input aria-label="年" inputMode="numeric" placeholder="1990" value={y} onChange={(e) => setY(digits(e.target.value, 4))} style={num} />
+                        <span style={small}>年</span>
+                        <input aria-label="月" inputMode="numeric" placeholder="1" value={m} onChange={(e) => setM(digits(e.target.value, 2))} style={num} />
+                        <span style={small}>月</span>
+                        <input aria-label="日" inputMode="numeric" placeholder="1" value={d} onChange={(e) => setD(digits(e.target.value, 2))} style={num} />
+                        <span style={small}>日</span>
+                    </div>
+                    {under ? (
+                        <div style={{ fontFamily: gothic, fontSize: 12, lineHeight: 1.9, marginTop: 10 }}>申し訳ございません。20歳未満の方にはお売りすることができません。</div>
+                    ) : null}
+
+                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 20 }}>
+                        <div>
+                            <label style={label("")} htmlFor="yl-zip">
+                                郵便番号
+                                <Req />
+                            </label>
+                            <input id="yl-zip" inputMode="numeric" placeholder="380-0000" value={zip} onChange={(e) => setZip(toHalf(e.target.value).replace(/[^0-9-]/g, "").slice(0, 8))} style={field} autoComplete="postal-code" />
+                        </div>
+                        <div>
+                            <label style={label("")} htmlFor="yl-tel">
+                                電話番号
+                                <Req />
+                            </label>
+                            <input id="yl-tel" inputMode="tel" placeholder="090-0000-0000" value={tel} onChange={(e) => setTel(toHalf(e.target.value).replace(/[^0-9-]/g, "").slice(0, 13))} style={field} autoComplete="tel" />
+                        </div>
+                    </div>
+
+                    <label style={label("")} htmlFor="yl-addr">
+                        ご住所
+                        <Req />
+                    </label>
+                    <textarea id="yl-addr" rows={2} value={addr} placeholder="都道府県から、建物名・部屋番号まで" onChange={(e) => setAddr(e.target.value)} style={{ ...field, resize: "none", lineHeight: 1.7 }} autoComplete="street-address" />
+
+                    <span style={label("")}>
+                        お届けの地域
+                        <Req />
+                    </span>
+                    {shipRegions.map((rg, i) => (
+                        <label
+                            key={i}
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: `1px solid ${tint(mute, "44")}`, cursor: "pointer", fontFamily: gothic, fontSize: 13 }}
+                        >
+                            <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                <span style={{ flex: "none", width: 11, height: 11, borderRadius: "50%", border: `1px solid ${ink}`, background: region === i ? ink : "transparent", transition: "background .3s" }} />
+                                <input type="radio" name="yohaku-letter-region" checked={region === i} onChange={() => setRegion(i)} style={{ position: "absolute", opacity: 0, pointerEvents: "none" }} />
+                                {rg.label}
+                            </span>
+                            <span style={{ color: mute, fontSize: 12, whiteSpace: "nowrap" }}>送料 ¥{rg.fee}</span>
+                        </label>
+                    ))}
+
+                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 20, alignItems: "end" }}>
+                        <div>
+                            <span style={label("")}>本数</span>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${ink}`, padding: "4px 0 2px" }}>
+                                <button type="button" aria-label="減らす" onClick={() => setCount(Math.max(1, count - 1))} style={{ background: "none", border: "none", color: ink, fontFamily: serif, fontSize: 22, cursor: "pointer", padding: "0 6px" }}>
+                                    −
+                                </button>
+                                <span style={{ fontFamily: serif, fontSize: 20 }}>{count}</span>
+                                <button type="button" aria-label="増やす" onClick={() => setCount(Math.min(24, count + 1))} style={{ background: "none", border: "none", color: ink, fontFamily: serif, fontSize: 22, cursor: "pointer", padding: "0 6px" }}>
+                                    +
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label style={label("")} htmlFor="yl-when">お届け日のご希望</label>
+                            <input id="yl-when" value={when} placeholder="指定なし" onChange={(e) => setWhen(e.target.value)} style={field} />
+                        </div>
+                    </div>
+
+                    {unit ? (
+                        <div style={{ marginTop: 26, paddingTop: 14, borderTop: `1px solid ${tint(mute, "44")}` }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", ...small }}>
+                                <span>商品代金（税込）</span>
+                                <span>{yen(subtotal)}</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", ...small }}>
+                                <span>送料</span>
+                                <span>{r ? yen(fee) : "—"}</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 6 }}>
+                                <span style={{ fontFamily: gothic, fontSize: 12, letterSpacing: "0.12em" }}>お振込み金額</span>
+                                <span style={{ fontFamily: serif, fontSize: 24 }}>{r ? yen(total) : "—"}</span>
+                            </div>
+                        </div>
+                    ) : null}
+                </>
+            ) : null}
+
+            <label style={label("")} htmlFor="yl-note">{kind === "order" ? "ご連絡事項" : "ご用件"}</label>
             <textarea
                 id="yl-note"
                 value={note}
                 rows={3}
-                placeholder="お届けの時期、のし・メッセージカードのご希望など"
+                placeholder={kind === "order" ? "のし・メッセージカード、領収書のご希望など" : "ギフトのご相談、本数、お届けの時期など"}
                 onChange={(e) => setNote(e.target.value)}
                 style={{ ...field, resize: "none", lineHeight: 1.8, fontSize: 14 }}
             />
 
             <a
-                href={href}
-                onClick={() => setSent(true)}
+                href={ok ? href : undefined}
+                role="button"
+                aria-disabled={!ok}
+                onClick={(e) => {
+                    if (!ok) {
+                        e.preventDefault()
+                        setTried(true)
+                        return
+                    }
+                    setSent(true)
+                }}
                 style={{
                     display: "block",
                     textAlign: "center",
                     marginTop: 32,
                     padding: "17px 0",
-                    background: ink,
-                    color: paper,
-                    border: `1px solid ${ink}`,
+                    background: ok ? ink : "transparent",
+                    color: ok ? paper : mute,
+                    border: `1px solid ${ok ? ink : tint(mute, "88")}`,
                     fontFamily: mincho,
                     fontSize: 15,
                     letterSpacing: "0.3em",
                     textDecoration: "none",
+                    cursor: "pointer",
+                    transition: "background .4s, color .4s",
                 }}
             >
-                メールを書く
+                {kind === "order" ? "注文のメールを書く" : "メールを書く"}
             </a>
-            <div style={{ fontFamily: gothic, fontSize: 11, color: mute, letterSpacing: "0.1em", lineHeight: 1.9, marginTop: 14, textAlign: "center" }}>
-                {sent ? "メールの画面が開かない場合は、下のアドレスへ直接どうぞ。" : "お使いのメールが、書きかけの状態でひらきます。"}
+            <div style={{ ...small, marginTop: 14, textAlign: "center" }}>
+                {tried && !ok
+                    ? `${missing.join("・")}をご記入ください。`
+                    : sent
+                      ? "メールの画面が開かない場合は、下のアドレスへ直接どうぞ。"
+                      : "お使いのメールが、書きかけの状態でひらきます。送信してはじめて届きます。"}
             </div>
+            {kind === "order" ? (
+                <div style={{ ...small, marginTop: 18, textAlign: "center", wordBreak: "keep-all", overflowWrap: "anywhere" }}>
+                    お振込先は、ご注文を確認したのちメールでお知らせします。
+                    <br />
+                    ご入金を確認してから、発送いたします。
+                </div>
+            ) : null}
 
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "baseline", gap: 14, marginTop: 18 }}>
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "baseline", gap: 14, marginTop: 22 }}>
                 <a href={`mailto:${email}`} style={{ fontFamily: serif, fontSize: 18, color: ink, textDecoration: "none", letterSpacing: "0.01em" }}>
                     {email}
                 </a>
-                <button
-                    type="button"
-                    onClick={copy}
-                    style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: mute, fontFamily: serif, fontStyle: "italic", fontSize: 14 }}
-                >
+                <button type="button" onClick={copy} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: mute, fontFamily: serif, fontStyle: "italic", fontSize: 14 }}>
                     {copied ? "copied" : "copy"}
                 </button>
             </div>
-            <div style={{ fontFamily: gothic, fontSize: 11, color: mute, letterSpacing: "0.06em", lineHeight: 1.9, marginTop: 22, textAlign: "center" }}>
-                お酒のご注文には、生年月日を確認させていただいています。
-                <br />
-                {AGE_NOTICE}
-            </div>
+            <div style={{ fontFamily: gothic, fontSize: 11, color: mute, letterSpacing: "0.06em", lineHeight: 1.9, marginTop: 18, textAlign: "center" }}>{AGE_NOTICE}</div>
         </div>
     )
 }
@@ -715,8 +950,8 @@ YohakuPurchase.defaultProps = {
     regionDFee: "",
     regionDUrl: "",
     contactEmail: "yohaku.ohba@gmail.com",
-    contactLabel: "メールで相談する",
-    contactHint: "ギフト・まとまった本数・そのほかのお問い合わせ",
+    contactLabel: "メールでのご注文・ご相談",
+    contactHint: "銀行振込でのご注文・ギフト・まとまった本数など",
     legalHref: "/legal",
     paper: "#F7F7F5",
     ink: "#111111",
