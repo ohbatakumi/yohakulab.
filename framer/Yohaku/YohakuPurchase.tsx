@@ -584,9 +584,6 @@ function Sheet(p: SheetProps) {
                                 ))}
                             </div>
 
-                            {(couponCode || coupon2Code) && !byLetter && count === 2 ? (
-                                <div style={{ ...small, marginTop: 26 }}>クーポンは、1本でのご購入が対象です。</div>
-                            ) : null}
                             {(couponCode || coupon2Code) && !byLetter && count === 1 ? (
                                 <div style={{ marginTop: 26 }}>
                                     <label htmlFor="yl-coupon" style={{ ...small, display: "block" }}>
