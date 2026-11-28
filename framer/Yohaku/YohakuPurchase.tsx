@@ -58,6 +58,12 @@ type Props = {
     regionDLabel: string
     regionDFee: string
     regionDUrl: string
+    couponCode: string
+    couponNote: string
+    regionACouponUrl: string
+    regionBCouponUrl: string
+    regionCCouponUrl: string
+    regionDCouponUrl: string
     contactEmail: string
     contactLabel: string
     contactHint: string
@@ -94,6 +100,7 @@ export default function YohakuPurchase(props: Props) {
         name, accent, spec, price, releaseAt, releaseText, soldOut, previewOpen,
         regionALabel, regionAFee, regionAUrl, regionBLabel, regionBFee, regionBUrl,
         regionCLabel, regionCFee, regionCUrl, regionDLabel, regionDFee, regionDUrl,
+        couponCode, couponNote, regionACouponUrl, regionBCouponUrl, regionCCouponUrl, regionDCouponUrl,
         contactEmail, contactLabel, contactHint, legalHref, paper, ink, mute,
     } = props
     const isCanvas = RenderTarget.current() === RenderTarget.canvas
@@ -255,13 +262,15 @@ export default function YohakuPurchase(props: Props) {
                           startContact={open === "contact"}
                           email={contactEmail}
                           price={price}
+                          couponCode={couponCode}
+                          couponNote={couponNote}
                           productName={[name, accent].filter(Boolean).join(" ")}
                           phone={phone}
                           regions={[
-                              { label: regionALabel, fee: regionAFee, url: regionAUrl },
-                              { label: regionBLabel, fee: regionBFee, url: regionBUrl },
-                              { label: regionCLabel, fee: regionCFee, url: regionCUrl },
-                              { label: regionDLabel, fee: regionDFee, url: regionDUrl },
+                              { label: regionALabel, fee: regionAFee, url: regionAUrl, couponUrl: regionACouponUrl },
+                              { label: regionBLabel, fee: regionBFee, url: regionBUrl, couponUrl: regionBCouponUrl },
+                              { label: regionCLabel, fee: regionCFee, url: regionCUrl, couponUrl: regionCCouponUrl },
+                              { label: regionDLabel, fee: regionDFee, url: regionDUrl, couponUrl: regionDCouponUrl },
                           ].filter((r) => r.label)}
                           legalHref={legalHref}
                           paper={paper}
@@ -275,13 +284,21 @@ export default function YohakuPurchase(props: Props) {
     )
 }
 
-type Region = { label: string; fee: string; url: string }
+type Region = { label: string; fee: string; url: string; couponUrl?: string }
+
+const normCode = (v: string) =>
+    String(v || "")
+        .replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+        .replace(/\s+/g, "")
+        .toUpperCase()
 
 type SheetProps = {
     onClose: () => void
     startContact: boolean
     email: string
     price: string
+    couponCode: string
+    couponNote: string
     productName: string
     phone: boolean
     regions: Region[]
@@ -292,12 +309,13 @@ type SheetProps = {
 }
 
 function Sheet(p: SheetProps) {
-    const { onClose, startContact, email, price, productName, phone, regions, legalHref, paper, ink, mute } = p
+    const { onClose, startContact, email, price, couponCode, couponNote, productName, phone, regions, legalHref, paper, ink, mute } = p
     const [mode, setMode] = React.useState<"buy" | "contact">(startContact ? "contact" : "buy")
     const [y, setY] = React.useState("")
     const [m, setM] = React.useState("")
     const [d, setD] = React.useState("")
     const [region, setRegion] = React.useState(-1)
+    const [coupon, setCoupon] = React.useState("")
     const [agreed, setAgreed] = React.useState(false)
     const [shown, setShown] = React.useState(false)
     const boxRef = React.useRef<HTMLDivElement>(null)
@@ -327,11 +345,15 @@ function Sheet(p: SheetProps) {
     const under = valid && age < 20
     const chosen = region >= 0 ? regions[region] : undefined
     const byLetter = !!chosen && !chosen.fee && !!email
-    const url = chosen?.url || ""
-    const ready = adult && !!chosen && (byLetter || (agreed && !!url))
+    const typed = normCode(coupon)
+    const couponOn = !!couponCode && !!typed && typed === normCode(couponCode)
+    const couponWrong = !!typed && !couponOn
+    const url = (couponOn ? chosen?.couponUrl : chosen?.url) || ""
+    const ready = adult && !!chosen && !couponWrong && (byLetter || (agreed && !!url))
 
     let goText = "お支払いへ"
     if (byLetter) goText = "メールで相談する"
+    else if (couponWrong) goText = "コードをご確認ください"
     else if (chosen && !url) goText = "準備中です"
 
     const input: React.CSSProperties = {
@@ -475,6 +497,34 @@ function Sheet(p: SheetProps) {
                                     </label>
                                 ))}
                             </div>
+
+                            {couponCode && !byLetter ? (
+                                <div style={{ marginTop: 26 }}>
+                                    <label htmlFor="yl-coupon" style={{ ...small, display: "block" }}>
+                                        クーポンコード
+                                        <span style={{ marginLeft: 8, letterSpacing: "0.06em" }}>お持ちの方のみ</span>
+                                    </label>
+                                    <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+                                        <input
+                                            id="yl-coupon"
+                                            value={coupon}
+                                            autoCapitalize="characters"
+                                            autoComplete="off"
+                                            spellCheck={false}
+                                            onChange={(e) => setCoupon(e.target.value.slice(0, 32))}
+                                            style={{ ...input, textAlign: "left", fontSize: 18, letterSpacing: "0.12em", padding: "10px 0 6px", textTransform: "uppercase" }}
+                                        />
+                                        <span style={{ flex: "none", fontFamily: serif, fontStyle: "italic", fontSize: 15, color: couponOn ? ink : mute, paddingBottom: 8, minWidth: 54, textAlign: "right" }}>
+                                            {couponOn ? "applied" : ""}
+                                        </span>
+                                    </div>
+                                    {couponOn ? (
+                                        <div style={{ fontFamily: gothic, fontSize: 12, lineHeight: 1.9, marginTop: 10, wordBreak: "keep-all", overflowWrap: "anywhere", whiteSpace: "pre-line" }}>{couponNote}</div>
+                                    ) : couponWrong && typed.length >= normCode(couponCode).length ? (
+                                        <div style={{ ...small, marginTop: 10 }}>このコードは見つかりませんでした。空欄のままでもご購入いただけます。</div>
+                                    ) : null}
+                                </div>
+                            ) : null}
 
                             {byLetter ? (
                                 <p style={{ fontFamily: gothic, fontSize: 12, lineHeight: 1.9, marginTop: 18, marginBottom: 0, wordBreak: "keep-all", overflowWrap: "anywhere" }}>
@@ -949,6 +999,12 @@ YohakuPurchase.defaultProps = {
     regionDLabel: "",
     regionDFee: "",
     regionDUrl: "",
+    couponCode: "YOHAKU2026",
+    couponNote: "クーポンが適用されます。\nお支払いの画面で、金額をご確認ください。",
+    regionACouponUrl: "",
+    regionBCouponUrl: "",
+    regionCCouponUrl: "",
+    regionDCouponUrl: "",
     contactEmail: "yohaku.ohba@gmail.com",
     contactLabel: "メールでのご注文・ご相談",
     contactHint: "銀行振込でのご注文・ギフト・まとまった本数など",
@@ -979,6 +1035,12 @@ addPropertyControls(YohakuPurchase, {
     regionDLabel: { type: ControlType.String, title: "Region D", placeholder: "空欄 = 表示しない" },
     regionDFee: { type: ControlType.String, title: "Region D fee", placeholder: "空欄 = メールで相談" },
     regionDUrl: { type: ControlType.String, title: "Region D Square link" },
+    couponCode: { type: ControlType.String, title: "Coupon code", placeholder: "空欄 = 欄を表示しない" },
+    couponNote: { type: ControlType.String, title: "Coupon message", displayTextArea: true },
+    regionACouponUrl: { type: ControlType.String, title: "Region A coupon link" },
+    regionBCouponUrl: { type: ControlType.String, title: "Region B coupon link" },
+    regionCCouponUrl: { type: ControlType.String, title: "Region C coupon link" },
+    regionDCouponUrl: { type: ControlType.String, title: "Region D coupon link" },
     contactEmail: { type: ControlType.String, title: "Contact email" },
     contactLabel: { type: ControlType.String, title: "Contact button", placeholder: "空欄 = 表示しない" },
     contactHint: { type: ControlType.String, title: "Contact hint" },
