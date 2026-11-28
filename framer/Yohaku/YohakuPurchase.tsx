@@ -378,14 +378,14 @@ function Sheet(p: SheetProps) {
     const chosen = region >= 0 ? regions[region] : undefined
     const byLetter = !!chosen && !chosen.fee && !!email
     // Each Square link carries a fixed quantity (and its own shipping), so 2 bottles go to a separate link.
-    // Coupons exist only on the 1-bottle links.
-    const typed = count === 1 ? normCode(coupon) : ""
+    // A valid coupon always wins: its Square link lets the buyer change the quantity there.
+    const typed = normCode(coupon)
     // Code 1 has its own link per region; code 2 has one link for every region.
     const coupon1On = !!couponCode && !!typed && typed === normCode(couponCode)
     const coupon2On = !!coupon2Code && !!typed && typed === normCode(coupon2Code)
     const couponOn = coupon1On || coupon2On
     const couponWrong = !!typed && !couponOn
-    const url = (count === 2 ? chosen?.url2 : coupon2On ? coupon2Url : coupon1On ? chosen?.couponUrl : chosen?.url) || ""
+    const url = (coupon2On ? coupon2Url : coupon1On ? chosen?.couponUrl : count === 2 ? chosen?.url2 : chosen?.url) || ""
     const unit = parseInt(String(price).replace(/[^0-9]/g, ""), 10) || 0
     const ready = adult && !!chosen && !couponWrong && (byLetter || (agreed && !!url))
 
@@ -584,7 +584,7 @@ function Sheet(p: SheetProps) {
                                 ))}
                             </div>
 
-                            {(couponCode || coupon2Code) && !byLetter && count === 1 ? (
+                            {(couponCode || coupon2Code) && !byLetter ? (
                                 <div style={{ marginTop: 26 }}>
                                     <label htmlFor="yl-coupon" style={{ ...small, display: "block" }}>
                                         クーポンコード
