@@ -63,6 +63,11 @@ type Props = {
     coupon2Code: string
     coupon2Url: string
     ageMode: string
+    regionA2Url: string
+    regionB2Url: string
+    regionC2Url: string
+    regionD2Url: string
+    bulkNote: string
     regionACouponUrl: string
     regionBCouponUrl: string
     regionCCouponUrl: string
@@ -103,7 +108,7 @@ export default function YohakuPurchase(props: Props) {
         name, accent, spec, price, releaseAt, releaseText, soldOut, previewOpen,
         regionALabel, regionAFee, regionAUrl, regionBLabel, regionBFee, regionBUrl,
         regionCLabel, regionCFee, regionCUrl, regionDLabel, regionDFee, regionDUrl,
-        couponCode, couponNote, coupon2Code, coupon2Url, ageMode, regionACouponUrl, regionBCouponUrl, regionCCouponUrl, regionDCouponUrl,
+        couponCode, couponNote, coupon2Code, coupon2Url, ageMode, regionA2Url, regionB2Url, regionC2Url, regionD2Url, bulkNote, regionACouponUrl, regionBCouponUrl, regionCCouponUrl, regionDCouponUrl,
         contactEmail, contactLabel, contactHint, legalHref, paper, ink, mute,
     } = props
     const isCanvas = RenderTarget.current() === RenderTarget.canvas
@@ -245,6 +250,9 @@ export default function YohakuPurchase(props: Props) {
                     {contactHint ? (
                         <div style={{ fontFamily: gothic, fontSize: 11, color: mute, letterSpacing: "0.1em", marginTop: 10, textAlign: "center", lineHeight: 1.8 }}>{contactHint}</div>
                     ) : null}
+                    {bulkNote ? (
+                        <div style={{ fontFamily: gothic, fontSize: 12, color: ink, letterSpacing: "0.08em", marginTop: 4, textAlign: "center", lineHeight: 1.8 }}>{bulkNote}</div>
+                    ) : null}
                 </>
             ) : null}
 
@@ -270,13 +278,14 @@ export default function YohakuPurchase(props: Props) {
                           coupon2Code={coupon2Code}
                           coupon2Url={coupon2Url}
                           ageCheckOnly={ageMode !== "birthdate"}
+                          bulkNote={bulkNote}
                           productName={[name, accent].filter(Boolean).join(" ")}
                           phone={phone}
                           regions={[
-                              { label: regionALabel, fee: regionAFee, url: regionAUrl, couponUrl: regionACouponUrl },
-                              { label: regionBLabel, fee: regionBFee, url: regionBUrl, couponUrl: regionBCouponUrl },
-                              { label: regionCLabel, fee: regionCFee, url: regionCUrl, couponUrl: regionCCouponUrl },
-                              { label: regionDLabel, fee: regionDFee, url: regionDUrl, couponUrl: regionDCouponUrl },
+                              { label: regionALabel, fee: regionAFee, url: regionAUrl, couponUrl: regionACouponUrl, url2: regionA2Url },
+                              { label: regionBLabel, fee: regionBFee, url: regionBUrl, couponUrl: regionBCouponUrl, url2: regionB2Url },
+                              { label: regionCLabel, fee: regionCFee, url: regionCUrl, couponUrl: regionCCouponUrl, url2: regionC2Url },
+                              { label: regionDLabel, fee: regionDFee, url: regionDUrl, couponUrl: regionDCouponUrl, url2: regionD2Url },
                           ].filter((r) => r.label)}
                           legalHref={legalHref}
                           paper={paper}
@@ -301,7 +310,7 @@ function AgeTick(p: { checked: boolean; onChange: (v: boolean) => void; ink: str
     )
 }
 
-type Region = { label: string; fee: string; url: string; couponUrl?: string }
+type Region = { label: string; fee: string; url: string; couponUrl?: string; url2?: string }
 
 const normCode = (v: string) =>
     String(v || "")
@@ -319,6 +328,7 @@ type SheetProps = {
     coupon2Code: string
     coupon2Url: string
     ageCheckOnly: boolean
+    bulkNote: string
     productName: string
     phone: boolean
     regions: Region[]
@@ -329,7 +339,7 @@ type SheetProps = {
 }
 
 function Sheet(p: SheetProps) {
-    const { onClose, startContact, email, price, couponCode, couponNote, coupon2Code, coupon2Url, ageCheckOnly, productName, phone, regions, legalHref, paper, ink, mute } = p
+    const { onClose, startContact, email, price, couponCode, couponNote, coupon2Code, coupon2Url, ageCheckOnly, bulkNote, productName, phone, regions, legalHref, paper, ink, mute } = p
     const [mode, setMode] = React.useState<"buy" | "contact">(startContact ? "contact" : "buy")
     const [over20, setOver20] = React.useState(false)
     const [y, setY] = React.useState("")
@@ -337,6 +347,7 @@ function Sheet(p: SheetProps) {
     const [d, setD] = React.useState("")
     const [region, setRegion] = React.useState(-1)
     const [coupon, setCoupon] = React.useState("")
+    const [count, setCount] = React.useState(1)
     const [agreed, setAgreed] = React.useState(false)
     const [shown, setShown] = React.useState(false)
     const boxRef = React.useRef<HTMLDivElement>(null)
@@ -366,13 +377,16 @@ function Sheet(p: SheetProps) {
     const under = !ageCheckOnly && valid && age < 20
     const chosen = region >= 0 ? regions[region] : undefined
     const byLetter = !!chosen && !chosen.fee && !!email
-    const typed = normCode(coupon)
+    // Each Square link carries a fixed quantity (and its own shipping), so 2 bottles go to a separate link.
+    // Coupons exist only on the 1-bottle links.
+    const typed = count === 1 ? normCode(coupon) : ""
     // Code 1 has its own link per region; code 2 has one link for every region.
     const coupon1On = !!couponCode && !!typed && typed === normCode(couponCode)
     const coupon2On = !!coupon2Code && !!typed && typed === normCode(coupon2Code)
     const couponOn = coupon1On || coupon2On
     const couponWrong = !!typed && !couponOn
-    const url = (coupon2On ? coupon2Url : coupon1On ? chosen?.couponUrl : chosen?.url) || ""
+    const url = (count === 2 ? chosen?.url2 : coupon2On ? coupon2Url : coupon1On ? chosen?.couponUrl : chosen?.url) || ""
+    const unit = parseInt(String(price).replace(/[^0-9]/g, ""), 10) || 0
     const ready = adult && !!chosen && !couponWrong && (byLetter || (agreed && !!url))
 
     let goText = "お支払いへ"
@@ -494,7 +508,44 @@ function Sheet(p: SheetProps) {
                         ) : null}
 
                         <div style={{ opacity: adult ? 1 : 0.35, pointerEvents: adult ? "auto" : "none", transition: "opacity .5s ease" }}>
-                            <div style={{ ...small, marginTop: 32 }}>お届け先の地域</div>
+                            <div style={{ ...small, marginTop: 32 }}>本数</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10 }}>
+                                {[1, 2].map((n) => (
+                                    <button
+                                        key={n}
+                                        type="button"
+                                        aria-pressed={count === n}
+                                        onClick={() => setCount(n)}
+                                        style={{
+                                            padding: "12px 0 10px",
+                                            background: count === n ? ink : "transparent",
+                                            color: count === n ? paper : ink,
+                                            border: `1px solid ${count === n ? ink : tint(mute, "88")}`,
+                                            borderRadius: 0,
+                                            cursor: "pointer",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            alignItems: "center",
+                                            gap: 2,
+                                            transition: "background .3s, color .3s",
+                                        }}
+                                    >
+                                        <span style={{ fontFamily: mincho, fontSize: 15, letterSpacing: "0.12em" }}>{n}本</span>
+                                        {unit ? <span style={{ fontFamily: serif, fontSize: 14, opacity: 0.75 }}>{"¥" + (unit * n).toLocaleString("ja-JP")}</span> : null}
+                                    </button>
+                                ))}
+                            </div>
+                            {bulkNote && email ? (
+                                <div style={{ ...small, marginTop: 10, letterSpacing: "0.08em" }}>
+                                    {bulkNote.endsWith("メールより承ります。") ? bulkNote.slice(0, -"メールより承ります。".length) : bulkNote + " "}
+                                    <button type="button" onClick={() => setMode("contact")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: ink, fontFamily: gothic, fontSize: 11, letterSpacing: "0.08em", borderBottom: `1px solid ${tint(ink, "55")}` }}>
+                                        メールより承ります
+                                    </button>
+                                    。
+                                </div>
+                            ) : null}
+
+                            <div style={{ ...small, marginTop: 28 }}>お届け先の地域</div>
                             <div style={{ marginTop: 6 }}>
                                 {regions.map((r, i) => (
                                     <label
@@ -533,7 +584,10 @@ function Sheet(p: SheetProps) {
                                 ))}
                             </div>
 
-                            {(couponCode || coupon2Code) && !byLetter ? (
+                            {(couponCode || coupon2Code) && !byLetter && count === 2 ? (
+                                <div style={{ ...small, marginTop: 26 }}>クーポンは、1本でのご購入が対象です。</div>
+                            ) : null}
+                            {(couponCode || coupon2Code) && !byLetter && count === 1 ? (
                                 <div style={{ marginTop: 26 }}>
                                     <label htmlFor="yl-coupon" style={{ ...small, display: "block" }}>
                                         クーポンコード
@@ -1054,6 +1108,11 @@ YohakuPurchase.defaultProps = {
     coupon2Code: "YOHAKU0909",
     coupon2Url: "https://square.link/u/cAoRtF2H",
     ageMode: "check",
+    regionA2Url: "https://square.link/u/ZsFBMpsg",
+    regionB2Url: "https://square.link/u/WBCqq4lk",
+    regionC2Url: "",
+    regionD2Url: "",
+    bulkNote: "3本以上のご購入は、メールより承ります。",
     regionACouponUrl: "https://square.link/u/rcdG5qug",
     regionBCouponUrl: "https://square.link/u/rjQQWhyz",
     regionCCouponUrl: "",
@@ -1091,6 +1150,11 @@ addPropertyControls(YohakuPurchase, {
     couponCode: { type: ControlType.String, title: "Coupon code", placeholder: "空欄 = 欄を表示しない" },
     couponNote: { type: ControlType.String, title: "Coupon message", displayTextArea: true },
     coupon2Code: { type: ControlType.String, title: "Coupon 2 code", placeholder: "空欄 = 使わない" },
+    regionA2Url: { type: ControlType.String, title: "Region A 2本 link" },
+    regionB2Url: { type: ControlType.String, title: "Region B 2本 link" },
+    regionC2Url: { type: ControlType.String, title: "Region C 2本 link" },
+    regionD2Url: { type: ControlType.String, title: "Region D 2本 link" },
+    bulkNote: { type: ControlType.String, title: "3本以上の案内" },
     ageMode: { type: ControlType.Enum, title: "Age check", options: ["check", "birthdate"], optionTitles: ["20歳以上のチェック", "生年月日の入力"] },
     coupon2Url: { type: ControlType.String, title: "Coupon 2 link (全地域)" },
     regionACouponUrl: { type: ControlType.String, title: "Region A coupon link" },
